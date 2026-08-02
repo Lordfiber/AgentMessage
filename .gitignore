@@ -1,0 +1,18 @@
+node_modules/
+dist/
+*.log
+config/settings.env
+
+# runtime 目录：忽略各子目录内容，保留 .gitkeep
+runtime/inbox/*
+!runtime/inbox/.gitkeep
+runtime/outbox/*
+!runtime/outbox/.gitkeep
+runtime/results/*
+!runtime/results/.gitkeep
+runtime/workspace/*
+!runtime/workspace/.gitkeep
+runtime/state/*
+!runtime/state/.gitkeep
+runtime/state/_dlq/*
+!runtime/state/_dlq/.gitkeep

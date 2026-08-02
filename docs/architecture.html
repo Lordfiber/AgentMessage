@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>多 TRAE 任务分发系统 · 整体设计</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --ink:#e2e8f0; --muted:#94a3b8;
+    --line:#334155; --accent:#38bdf8; --accent2:#a78bfa; --good:#34d399; --warn:#fbbf24;
+    --kafka:#f59e0b; --kb:#f472b6; --trae:#38bdf8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;line-height:1.65}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 28px 80px}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:.5px}
+  h2{font-size:21px;margin:42px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line);color:#fff}
+  h3{font-size:16px;margin:22px 0 10px;color:var(--accent)}
+  p{color:var(--ink)}
+  .sub{color:var(--muted);margin-top:0;font-size:14px}
+  .tag{display:inline-block;font-size:12px;padding:2px 10px;border-radius:999px;background:var(--panel2);color:var(--muted);margin-right:6px;border:1px solid var(--line)}
+  code,pre{font-family:"JetBrains Mono","Consolas",monospace}
+  pre{background:#0b1220;border:1px solid var(--line);border-radius:10px;padding:16px;overflow:auto;font-size:13px;color:#d7e3f4}
+  code{background:#0b1220;padding:1px 6px;border-radius:4px;font-size:13px;color:#7dd3fc}
+  .grid{display:grid;gap:16px}
+  .cards{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .card h3{margin-top:0}
+  .card .role{font-size:12px;color:var(--muted)}
+
+  /* 架构图 */
+  .diagram{background:#0b1220;border:1px solid var(--line);border-radius:14px;padding:28px 20px;margin-top:8px}
+  .layer{display:flex;justify-content:center;gap:18px;flex-wrap:wrap;position:relative}
+  .node{border-radius:12px;padding:14px 16px;min-width:200px;max-width:260px;text-align:center;border:2px solid}
+  .n-kb{border-color:var(--kb);background:rgba(244,114,182,.08)}
+  .n-trae{border-color:var(--trae);background:rgba(56,189,248,.08)}
+  .n-worker{border-color:var(--accent2);background:rgba(167,139,250,.08)}
+  .n-kafka{border-color:var(--kafka);background:rgba(245,158,11,.08)}
+  .node .t{font-weight:700;font-size:15px}
+  .node .d{font-size:12px;color:var(--muted);margin-top:4px}
+  .arrow-row{display:flex;justify-content:center;gap:120px;color:var(--muted);font-size:12px;margin:6px 0}
+  .arrow-row span{display:inline-block}
+  .vline{color:var(--muted);text-align:center;font-size:20px;line-height:1;margin:2px 0}
+  .flow-label{font-size:11px;color:var(--muted);background:#0b1220;padding:0 8px}
+  .pill{font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line);color:var(--ink)}
+
+  .step{display:flex;gap:12px;margin:8px 0}
+  .step .num{flex:0 0 28px;height:28px;border-radius:50%;background:var(--accent);color:#0b1220;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}
+  .step .body{flex:1}
+  .step.k .num{background:var(--kb)}
+  .step.t .num{background:var(--accent2)}
+  ul{margin:6px 0;padding-left:22px}
+  li{margin:4px 0}
+  .note{border-left:3px solid var(--good);background:rgba(52,211,153,.07);padding:10px 14px;border-radius:0 8px 8px 0;margin:10px 0;font-size:14px}
+  .warn{border-left-color:var(--warn);background:rgba(251,191,36,.07)}
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+  th{background:var(--panel2);color:#fff}
+  .kbd{background:#0b1220;border:1px solid var(--line);border-radius:4px;padding:1px 7px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>多 TRAE 任务分发系统 · 整体设计</h1>
+  <p class="sub">局域网内 3 台 Windows + TRAE：主 Agent（Orchestrator）编排研发状态机，经 Kafka 分发阶段任务，Worker 上的角色 Agent 定时触发执行，知识库中间层沉淀与召回经验。</p>
+  <p>
+    <span class="tag">TypeScript / Node.js</span>
+    <span class="tag">Kafka (KRaft, 服务器部署)</span>
+    <span class="tag">trae-cli 非交互触发</span>
+    <span class="tag">Windows 计划任务</span>
+    <span class="tag">知识库中间层（黑盒）</span>
+    <span class="tag">两套 Agent 体系（Orchestrator + 5 角色）</span>
+    <span class="tag">markitdown 输入清洗（仅 Orchestrator）</span>
+  </p>
+
+  <!-- 架构图 -->
+  <h2>整体架构</h2>
+  <div class="diagram">
+    <!-- markitdown 输入层（仅 Orchestrator） -->
+    <div class="layer">
+      <div class="node n-kb" style="border-color:#fb923c;background:rgba(251,146,60,.08)">
+        <div class="t">📥 markitdown · 输入清洗层</div>
+        <div class="d">doc/docx/pdf/企业微信/手动输入 → 统一 md<br>命令: markitdown <i>nio.pdf</i> &gt; <i>nio.md</i><br>仅 Orchestrator/TRAE-A 启动时调用，失败原样回退</div>
+      </div>
+    </div>
+    <div class="vline">▼ 清洗后的 .md 喂给 Orchestrator ▼</div>
+    <div style="height:8px"></div>
+
+    <!-- 知识库层 -->
+    <div class="layer">
+      <div class="node n-kb">
+        <div class="t">🧠 知识库中间层（黑盒）</div>
+        <div class="d">写入总结的知识 · 查询获取需要的知识</div>
+      </div>
+    </div>
+    <div class="vline">▲ 查询 / 写入 ▼</div>
+
+    <!-- TRAE 节点层 -->
+    <div class="layer">
+      <div class="node n-trae">
+        <div class="t">TRAE-A · 主Agent（Orchestrator）</div>
+        <div class="d">编排状态机 → 分发阶段任务<br>收口 → 聚合 + 写知识</div>
+      </div>
+      <div class="node n-worker">
+        <div class="t">TRAE-B · 角色 Agent</div>
+        <div class="d">pm/dev/review<br>查知识 → 执行 → 写总结</div>
+      </div>
+      <div class="node n-worker">
+        <div class="t">TRAE-C · 角色 Agent</div>
+        <div class="d">pm/dev/review<br>查知识 → 执行 → 写总结</div>
+      </div>
+    </div>
+
+    <div class="vline">▼ produce tasks &nbsp;&nbsp; consume/publish &nbsp;&nbsp; consume/publish ▼</div>
+
+    <!-- Kafka 层 -->
+    <div class="layer">
+      <div class="node n-kafka" style="max-width:680px">
+        <div class="t"> kafka 服务器（独立机器，Linux KRaft）</div>
+        <div class="d">agent-tasks（key=worker_id, 3 分区） · agent-results · agent-control</div>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:10px">
+      <span class="pill">worker 侧：Windows 计划任务每 N 分钟 → node dist/triggers/workerPoll.js</span>
+    </div>
+  </div>
+
+  <!-- 组件说明 -->
+  <h2>组件说明</h2>
+  <div class="grid cards">
+    <div class="card">
+      <h3>TRAE-A · 主 Agent（Orchestrator）</h3>
+      <div class="role">orchestrator</div>
+      <p>唯一实例，跑研发状态机（PM→Dev→Review→QA→Deploy）。每阶段把工作封装为任务消息（<code>type</code>=角色）→ <code>produceTask</code> 投递 Kafka；消费 results 推进状态机；3 道人工门禁；Review 不通过回退 Dev（≤3轮）。收口读 <code>runtime/results</code> 聚合 + 写知识库。</p>
+    </div>
+    <div class="card">
+      <h3>TRAE-B/C · 角色 Agent（Worker）</h3>
+      <div class="role">worker / role agent</div>
+      <p>承载 5 角色之一（pm/dev/review/qa/deploy）。计划任务每 N 分钟唤醒：<code>consumeTasks</code> 拉任务 → <b>知识库 query</b> → <code>trae-cli run --file</code> 执行角色职责 → 写结果 → <b>知识库 ingest</b> → <code>publishResults</code>。</p>
+    </div>
+    <div class="card">
+      <h3>Kafka 服务器</h3>
+      <div class="role">message bus</div>
+      <p>独立服务器部署（Linux KRaft 最稳，也可 Docker/WSL2/Windows）。三主题：<code>agent-tasks</code>（按 worker_id 分区，保序）、<code>agent-results</code>、<code>agent-control</code>（stop/pause/resume）。持久化、可回放、worker 离线不丢任务。</p>
+    </div>
+    <div class="card">
+      <h3>知识库中间层（黑盒）</h3>
+      <div class="role">knowledge layer</div>
+      <p>不关心内部实现（向量库/全文/图谱皆可）。对外仅两个方向：<b>写入</b>总结的知识、<b>查询</b>获取本次需要的知识。供编排者与 Worker 在执行前后调用，沉淀经验、召回上下文。</p>
+    </div>
+    <div class="card">
+      <h3>触发器与计划任务</h3>
+      <div class="role">scheduler</div>
+      <p><code>workerPoll.ts</code> 文件锁防重入 + 检测 control stop 信号；<code>triggerTrae.ts</code> 可插拔（trae-cli 首选，IDE-UI 兜底）；<code>registerTasks.ts</code> 用 PowerShell 注册 Windows 计划任务。</p>
+    </div>
+    <div class="card">
+      <h3>markitdown · 输入清洗层</h3>
+      <div class="role">orchestrator-only</div>
+      <p><b>只在 Orchestrator/TRAE-A 启动时调用</b>（仅它接收杂格式：doc/docx/pdf/txt/企业微信消息/手动输入）。命令：<code>markitdown nio.pdf &gt; nio.md</code>。统一清洗为 Markdown 再喂给 LLM；markitdown 不可用/失败时原样回退，不中断流程。代码入口：<code>src/orchestrator/normalizeInput.ts</code>。</p>
+    </div>
+    <div class="card">
+      <h3>Broker 桥接层</h3>
+      <div class="role">zero-token I/O</div>
+      <p>所有 Kafka 连接/轮询/回传都在 TS 脚本里，agent 不参与。<code>produceTask / consumeTasks / publishResults / consumeResults</code> + 契约校验 + 死信目录。</p>
+    </div>
+  </div>
+
+  <!-- 两套 Agent 体系 -->
+  <h2>两套 Agent 体系与研发状态机</h2>
+  <div class="grid cards" style="margin-bottom:16px">
+    <div class="card">
+      <h3>第一套 · 主 Agent（编排调度层）</h3>
+      <div class="role">Orchestrator · 唯一实例 · TRAE-A</div>
+      <p>跑研发状态机，决定"现在跑哪个阶段"，把阶段任务分发出去并处理返回值。<b>拆流程不拆任务</b>。3 道人工门禁；Review 不通过回退 Dev（≤3 轮）。</p>
+    </div>
+    <div class="card">
+      <h3>第二套 · 角色 Agent（执行层）</h3>
+      <div class="role">5 角色 · 多实例并行 · Worker TRAE</div>
+      <p>pm（需求+拆解）/ dev（开发+修复）/ review / qa（占位）/ deploy（占位）。PM 拆任务，Dev 并行实现，其余各司其职。</p>
+    </div>
+  </div>
+
+  <h3>研发状态机</h3>
+  <div class="diagram" style="padding:20px">
+    <div class="layer" style="gap:8px">
+      <span class="pill" style="border-color:var(--accent)">PM</span>
+      <span style="color:var(--muted)">→</span>
+      <span class="pill" style="border-color:var(--accent2)">Dev</span>
+      <span style="color:var(--muted)">→</span>
+      <span class="pill" style="border-color:var(--accent2)">Review</span>
+      <span style="color:var(--muted)">→</span>
+      <span class="pill" style="border-color:var(--warn)">QA（占位）</span>
+      <span style="color:var(--muted)">→</span>
+      <span class="pill" style="border-color:var(--warn)">Deploy（占位）</span>
+    </div>
+    <div class="vline" style="font-size:13px;margin-top:12px">↰ Review 不通过 → 回退 Dev（≤3 轮）↶</div>
+    <div style="text-align:center;margin-top:8px">
+      <span class="pill">门禁① PRD评审（PM后）</span>
+      <span class="pill">门禁② 提测评审（QA后）</span>
+      <span class="pill">门禁③ 上线评审（Deploy前）</span>
+    </div>
+  </div>
+
+  <h3>角色清单</h3>
+  <table>
+    <tr><th>type</th><th>角色</th><th>职责</th><th>产出</th></tr>
+    <tr><td><code>pm</code></td><td>PM Agent</td><td>需求分析 + 任务拆解（合并）</td><td>pm.md（PRD+任务卡+DAG）</td></tr>
+    <tr><td><code>dev</code></td><td>Dev Agent</td><td>代码开发 + 修复（合并，含 Fix 循环）</td><td>代码变更 + dev.md + patch</td></tr>
+    <tr><td><code>review</code></td><td>Review Agent</td><td>多维度代码审查，分级问题</td><td>review.md</td></tr>
+    <tr><td><code>qa</code></td><td>QA Agent</td><td>提测验收（占位，暂不实现）</td><td>qa_report.md</td></tr>
+    <tr><td><code>deploy</code></td><td>Deploy Agent</td><td>上线部署（占位，暂不实现）</td><td>deploy.md</td></tr>
+  </table>
+  <p class="sub">详见 <code>docs/agents-system.md</code>。</p>
+
+  <!-- 数据流 -->
+  <h2>数据流</h2>
+
+  <h3>① 任务分发流（Kafka 主链路）</h3>
+  <div class="step k"><div class="num" style="background:#fb923c">0</div><div class="body"><b>markitdown 输入清洗（仅 Orchestrator）</b>：杂格式原始输入 → <code>npx tsx src/orchestrator/normalizeInput.ts &lt;原始文件&gt;</code>（或 <code>--text</code>）→ 产出 <code>runtime/input-clean/xxx.md</code>，再把这份清洗后的 .md 喂给 LLM。失败/不可用自动原样回退，不中断。</div></div>
+  <div class="step t"><div class="num">1</div><div class="body"><b>Orchestrator 分发阶段任务</b>：基于清洗后的 .md 内容，按状态机当前阶段，把工作封装为任务消息 JSON（<code>type</code>=角色，含 directive + expected_output）→ <code>npx tsx src/broker/produceTask.ts &lt;task.json&gt;</code> 投递到 <code>agent-tasks</code>，key=worker_id。PM 阶段由 PM Agent 拆任务，Dev 阶段并行分发多个 dev 任务。</div></div>
+  <div class="step t"><div class="num">2</div><div class="body"><b>Worker 拉取</b>：计划任务触发 <code>workerPoll</code> → <code>consumeTasksForWorker</code> 消费分给自己的消息 → 渲染 <code>inbox/&lt;task_id&gt;.md</code> + <code>.json</code>，按 task_id 去重。inbox 为空则直接退出（零开销）。</div></div>
+  <div class="step t"><div class="num">3</div><div class="body"><b>Worker 执行</b>：<code>triggerTrae</code> 调 <code>trae-cli run --file &lt;task_id&gt;.md --output &lt;result_file&gt;</code>，按 <code>timeout_sec/max_steps</code> 控上限，退出码映射 status。</div></div>
+  <div class="step t"><div class="num">4</div><div class="body"><b>结果回传</b>：<code>publishPendingResults</code> 把 outbox 的结果生产到 <code>agent-results</code> → 编排者 <code>consumeResults</code> 落 <code>runtime/results/</code>。</div></div>
+  <div class="step t"><div class="num">5</div><div class="body"><b>收口</b>：编排者读 <code>runtime/results</code> 聚合；失败可修正后重新 produce。</div></div>
+
+  <h3>② 知识库交互流（黑盒，两方向）</h3>
+  <div class="step k"><div class="num">Q</div><div class="body"><b>查询获取（执行前）</b>：Worker 拿到任务后、执行前，向知识库发<b>查询请求</b>（任务目标 + 关键词），获取本次内容需要的知识（历史经验、相关模式、上下文），作为 directive 之外的补充上下文注入 <code>.md</code>。编排者拆任务时也可查询以辅助拆解。</div></div>
+  <div class="step k"><div class="num">W</div><div class="body"><b>写入总结（执行后）</b>：Worker 执行完成后、回传结果前，向知识库发<b>写入请求</b>，把本次的总结知识（做了什么、踩了什么坑、可复用的模式）沉淀进去。编排者收口后也可写入整体总结。</div></div>
+
+  <div class="note">知识库中间层是<b>黑盒</b>：系统只约定"查询 / 写入"两个交互方向与请求/响应字段，内部存储、检索算法、向量化等一概不关心，可按需替换实现。</div>
+
+  <!-- 消息契约 -->
+  <h2>消息契约（Kafka 消息体）</h2>
+  <p>每条任务消息都包含给对应 TRAE 的<b>明确任务指示（directive）</b>与<b>预期返回声明（expected_output）</b>。</p>
+
+  <h3>任务消息 · agent-tasks</h3>
+<pre><code>{
+  "schema_version": "1.0",
+  "task_id": "t-20260802-0001",
+  "worker_id": "worker-B",
+  "type": "code",
+  "created_at": "2026-08-02T10:00:00Z",
+  "timeout_sec": 1800,
+  "max_steps": 50,
+
+  "directive": {                          // 给对应 TRAE 的任务指示
+    "objective": "为用户模块增加结构化日志",
+    "background": "父任务要求提升可观测性；worker-C 负责单测",
+    "context_refs": ["d:/workspace/foo/src/user.ts"],
+    "instructions": [
+      "在 login/logout 出口加 INFO 级结构化日志",
+      "日志字段：trace_id、user_id、event、ts",
+      "不改动 public API 签名"
+    ],
+    "constraints": { "language": "typescript", "forbidden": ["改 package.json 依赖版本"] },
+    "acceptance_criteria": ["login/logout 均输出结构化日志", "npm run build 通过"]
+  },
+
+  "workspace": "d:/workspace/foo",
+  "expected_output": {                    // 预期返回声明
+    "deliverables": ["src/user.ts (修改)", "src/logger.ts (新增)"],
+    "result_file": "runtime/outbox/t-20260802-0001.result.json",
+    "result_schema": {
+      "status": "success|failed|partial",
+      "summary": "string", "artifacts": ["string"], "patch": "string (git diff)",
+      "metrics": { "duration_sec": "number", "token_usage": { "input": "number", "output": "number" } },
+      "error": "string"
+    },
+    "patch_required": true
+  }
+}</code></pre>
+
+  <h3>结果消息 · agent-results（与 expected_output.result_schema 对齐）</h3>
+<pre><code>{
+  "schema_version": "1.0",
+  "task_id": "t-20260802-0001",
+  "worker_id": "worker-B",
+  "status": "success",
+  "summary": "在 user.ts login/logout 增加结构化日志，新增 logger.ts。",
+  "artifacts": ["src/user.ts", "src/logger.ts"],
+  "patch": "diff --git a/src/user.ts ...",
+  "metrics": { "duration_sec": 87, "token_usage": { "input": 1234, "output": 567 } },
+  "error": "",
+  "completed_at": "2026-08-02T10:03:21Z"
+}</code></pre>
+
+  <!-- 知识库黑盒接口 -->
+  <h2>知识库中间层 · 黑盒接口（示意）</h2>
+  <p>系统侧只认这两类请求，内部实现任意。</p>
+
+  <h3>查询请求（执行前 / 拆解时）</h3>
+<pre><code>→ POST /knowledge/query
+{
+  "task_id": "t-20260802-0001",
+  "worker_id": "worker-B",
+  "objective": "为用户模块增加结构化日志",
+  "query": "结构化日志 trace_id 传递最佳实践",
+  "context_refs": ["d:/workspace/foo/src/user.ts"]
+}
+← 200
+{
+  "knowledge": [
+    "本项目 logger.ts 已提供 withTrace(ctx) 工具，复用即可",
+    "历史经验：login 出口需记录 user_id 脱敏值"
+  ],
+  "sources": ["t-20260715-0042", "t-20260720-0011"]
+}</code></pre>
+
+  <h3>写入请求（执行后 / 收口时）</h3>
+<pre><code>→ POST /knowledge/ingest
+{
+  "task_id": "t-20260802-0001",
+  "worker_id": "worker-B",
+  "summary": "login/logout 接入 withTrace，新增 logger.ts 集中导出",
+  "artifacts": ["src/user.ts", "src/logger.ts"],
+  "lessons": ["trace_id 需从请求头透传，勿在函数内新生成"],
+  "tags": ["logging", "observability"]
+}
+← 200
+{ "accepted": true, "id": "kb-9821" }</code></pre>
+
+  <div class="note warn">黑盒边界：以上请求/响应字段仅为系统侧约定。知识库内部如何存储、检索、向量化、衰减，均不影响主链路，可独立演进或替换。</div>
+
+  <!-- 部署 -->
+  <h2>部署与运行</h2>
+  <table>
+    <tr><th>步骤</th><th>位置</th><th>动作</th></tr>
+    <tr><td>1</td><td>服务器</td><td>部署 Kafka KRaft，<code>advertised.listeners=PLAINTEXT://&lt;服务器IP&gt;:9092</code>，放行 9092</td></tr>
+    <tr><td>2</td><td>各 TRAE 机器</td><td><code>npm install &amp;&amp; npm run build</code>；复制 <code>config/settings.env.example</code> 为 <code>settings.env</code>，填 <code>KAFKA_BOOTSTRAP</code> / <code>WORKER_ID</code></td></tr>
+    <tr><td>3</td><td>任意一台</td><td><code>npx tsx src/broker/createTopics.ts</code> 建主题</td></tr>
+    <tr><td>4</td><td>单机自测</td><td><code>npm run selftest</code> 跑契约往返（需 Kafka 在线）</td></tr>
+    <tr><td>5</td><td>编排者</td><td>在 TRAE 里按 <code>skills/orchestrator.md</code> 拆任务 → <code>produceTask</code> 投递</td></tr>
+    <tr><td>6</td><td>Worker</td><td><code>npx tsx src/deploy/registerTasks.ts</code> 注册计划任务，每 N 分钟自动拉取→执行→回传</td></tr>
+    <tr><td>7</td><td>知识库</td><td>部署黑盒服务，向 Worker/编排者暴露 <code>/knowledge/query</code> 与 <code>/knowledge/ingest</code>（实现自定）</td></tr>
+  </table>
+
+  <!-- 设计要点 -->
+  <h2>设计要点</h2>
+  <div class="grid cards">
+    <div class="card"><h3>省 token</h3><p>Kafka 连接/轮询/回传全在 TS 脚本；agent 单次会话只执行一个任务；inbox 为空不启动 trae-cli；知识库查询/写入也由脚本完成，结果作为文本注入 prompt。</p></div>
+    <div class="card"><h3>可解耦</h3><p>Kafka 解耦编排者与 Worker；知识库黑盒解耦经验沉淀与主链路；trae-cli 非交互解耦 agent 与 IDE GUI。</p></div>
+    <div class="card"><h3>可恢复</h3><p>Kafka 持久化 + consumer offset + <code>state/processed.jsonl</code> 去重；worker 离线后上线续消费不丢任务。</p></div>
+    <div class="card"><h3>可校验</h3><p>所有消息 <code>schema_version=1.0</code> + 必填/枚举校验；不合法进死信目录 <code>runtime/state/_dlq/</code>，不触发执行。</p></div>
+    <div class="card"><h3>可控制</h3><p><code>agent-control</code> 主题下发 stop/pause/resume；<code>workerPoll</code> 下轮检测生效，不中断在执行任务。</p></div>
+    <div class="card"><h3>可沉淀</h3><p>知识库中间层把每次任务的总结转化为可召回资产，执行前查询注入，让 Worker 越做越聪明。</p></div>
+  </div>
+
+  <p class="sub" style="margin-top:40px">文件清单：orchestrator/normalizeInput（markitdown 输入清洗） · broker/（kafkaHelper · createTopics · produceTask · consumeTasks · publishResults · consumeResults · validate · selftest） · triggers/（triggerTrae · workerPoll · orchestratorCollect） · deploy/registerTasks · skills/（orchestrator · worker_task_template） · config/（settings.env · workers.yaml） · docs/（architecture.html · agents-system.md）</p>
+
+</div>
+</body>
+</html>

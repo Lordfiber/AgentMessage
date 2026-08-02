@@ -1,0 +1,8 @@
+# Worker 注册表
+workers:
+  - id: worker-B
+    host: 192.168.1.20
+    partition: 0
+  - id: worker-C
+    host: 192.168.1.21
+    partition: 1
