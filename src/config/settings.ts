@@ -18,6 +18,7 @@ export interface Settings {
   DLQ_DIR: string;
   PROCESSED_FILE: string;
   WORKER_LOCK: string;
+  AGENT_HOOK_URL: string; // Agent 完成 Hook 黑盒后端地址，空则 no-op
 }
 
 /**
@@ -59,5 +60,6 @@ export function loadSettings(): Settings {
     DLQ_DIR: dlqDir,
     PROCESSED_FILE: processedFile,
     WORKER_LOCK: workerLock,
+    AGENT_HOOK_URL: process.env.AGENT_HOOK_URL ?? '',
   };
 }

@@ -5,6 +5,26 @@ export type TaskType = 'pm' | 'dev' | 'review' | 'qa' | 'deploy';
 export type TaskStatus = 'success' | 'failed' | 'partial';
 export type ControlCmd = 'stop' | 'pause' | 'resume';
 
+/** Agent 角色：orchestrator（主 Agent）或 5 个角色 Agent 之一 */
+export type AgentRole = 'orchestrator' | TaskType;
+
+/** Agent 完成 Hook 的上报载荷（发往黑盒后端） */
+export interface HookPayload {
+  event: 'agent_complete' | 'stage_progress';
+  trace_id?: string;
+  task_id: string;
+  parent_task_id?: string;
+  agent_role: AgentRole;
+  worker_id: string;
+  stage?: TaskType | 'input';
+  status: TaskStatus;
+  summary?: string;
+  artifacts?: string[];
+  metrics?: { duration_sec: number; token_usage: { input: number; output: number } };
+  error?: string;
+  completed_at: string;
+}
+
 export interface Constraints {
   language?: string;
   style?: string;
@@ -40,6 +60,7 @@ export interface TaskMessage {
   schema_version: string; // '1.0'
   task_id: string;
   parent_task_id?: string;
+  trace_id?: string; // 链路唯一 ID（Orchestrator 生成，贯穿全程）
   worker_id: string;
   worker_role?: string;
   type: TaskType;
@@ -56,6 +77,7 @@ export interface TaskMessage {
 export interface TaskResult {
   schema_version: string;
   task_id: string;
+  trace_id?: string;
   worker_id: string;
   status: TaskStatus;
   summary: string;

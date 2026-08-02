@@ -71,6 +71,9 @@
     <span class="tag">知识库中间层（黑盒）</span>
     <span class="tag">两套 Agent 体系（Orchestrator + 5 角色）</span>
     <span class="tag">markitdown 输入清洗（仅 Orchestrator）</span>
+    <span class="tag">端到端链路追踪 · trace_id 贯穿 + 每步容错</span>
+    <span class="tag">Agent 完成 Hook（黑盒后端）</span>
+    <span class="tag">Agent 统一管理层（中间件管道）</span>
   </p>
 
   <!-- 架构图 -->
@@ -163,6 +166,16 @@
       <div class="role">zero-token I/O</div>
       <p>所有 Kafka 连接/轮询/回传都在 TS 脚本里，agent 不参与。<code>produceTask / consumeTasks / publishResults / consumeResults</code> + 契约校验 + 死信目录。</p>
     </div>
+    <div class="card">
+      <h3>Agent 统一管理层（中间件管道）</h3>
+      <div class="role">cross-cutting concerns</div>
+      <p>所有 agent 生命周期事件经 <code>emitAgentEvent(ctx)</code> 管道分发。横切关注点（hook/评审/总结/审计/token 统计）注册为中间件，<b>加新关注点 = <code>useAgentMiddleware</code> 一行，零改动 agent 代码</b>。入口 <code>src/agent/</code>。解决"每个 agent 后面重复加 hook/评审/总结"的冗余。</p>
+    </div>
+    <div class="card">
+      <h3>Agent 完成 Hook（中间件①）</h3>
+      <div class="role">audit / monitor / BI</div>
+      <p>统一管理层的第①个中间件：把 agent 完成详情 POST 到 <code>AGENT_HOOK_URL</code> 黑盒后端。未配置 → no-op；失败 → 落 <code>runtime/hooks/_failed/</code>，不中断主流程。底层传输 <code>src/broker/hookReport.ts</code>。</p>
+    </div>
   </div>
 
   <!-- 两套 Agent 体系 -->
@@ -212,6 +225,53 @@
   </table>
   <p class="sub">详见 <code>docs/agents-system.md</code>。</p>
 
+  <!-- Agent 统一管理层 -->
+  <h2>Agent 统一管理层（中间件管道 · 横切关注点集中化）</h2>
+  <p><b>问题</b>：每加一个横切关注点（hook、评审、总结、审计、token 统计...）都要在每个 agent 后面重复一遍——冗余且易漏。</p>
+  <p><b>方案</b>：所有 agent 的生命周期事件都经 <code>emitAgentEvent(ctx)</code> 统一管道分发；每个关注点注册为一个中间件，管道依次执行。<b>加新关注点 = <code>useAgentMiddleware</code> 一行，零改动任何 agent 代码</b>。</p>
+
+  <h3>管道流转图</h3>
+  <div class="diagram" style="padding:20px">
+    <div class="layer">
+      <div class="node n-trae" style="max-width:200px"><div class="t">主 Agent</div><div class="d">Orchestrator</div></div>
+      <div class="node n-worker" style="max-width:200px"><div class="t">角色 Agent ×5</div><div class="d">pm/dev/review/qa/deploy</div></div>
+    </div>
+    <div class="vline" style="font-size:12px">↓ 都只调 emitAgentEvent(ctx) &nbsp;（不再各自调 hook/评审/总结）</div>
+    <div class="layer">
+      <div class="node" style="border-color:var(--accent);max-width:420px">
+        <div class="t">🔁 Agent 统一管理层 · 中间件管道</div>
+        <div class="d">emitAgentEvent 依次跑所有注册的中间件，任一失败不影响其他</div>
+      </div>
+    </div>
+    <div class="vline" style="font-size:12px">↓ 分发到各中间件</div>
+    <div class="layer" style="gap:10px">
+      <div class="pill" style="border-color:#34d399">① hook → 黑盒后端</div>
+      <div class="pill" style="border-color:var(--warn)">② review（未来）</div>
+      <div class="pill" style="border-color:var(--warn)">③ summary（未来）</div>
+      <div class="pill" style="border-color:var(--warn)">④ audit（未来）</div>
+      <div class="pill" style="border-color:var(--warn)">⑤ token-stat（未来）</div>
+    </div>
+    <div class="vline" style="font-size:12px">↓ 各中间件独立处理</div>
+    <div class="layer" style="gap:10px">
+      <div class="node" style="border-color:#34d399;max-width:150px"><div class="t">📡 Hook 黑盒</div></div>
+      <div class="node n-kb" style="max-width:150px"><div class="t">🧠 知识库</div><div class="d">summary→ingest</div></div>
+      <div class="node" style="border-color:#64748b;max-width:150px"><div class="t">📁 审计日志</div></div>
+      <div class="node" style="border-color:#64748b;max-width:150px"><div class="t">📊 token 看板</div></div>
+    </div>
+  </div>
+
+  <h3>中间件清单（加新关注点在这里注册一行）</h3>
+  <table>
+    <tr><th>#</th><th>中间件</th><th>事件触发</th><th>作用</th><th>状态</th></tr>
+    <tr><td>①</td><td><code>hookMiddleware</code></td><td><code>task_completed / stage_advanced</code></td><td>POST agent 完成详情到 <code>AGENT_HOOK_URL</code> 黑盒后端</td><td>✅ 已实现</td></tr>
+    <tr><td>②</td><td><code>reviewMiddleware</code></td><td><code>task_completed(dev)</code></td><td>dev 产出自动触发 review 角色，或挂人工评审门禁</td><td>⏳ TODO</td></tr>
+    <tr><td>③</td><td><code>summaryMiddleware</code></td><td><code>stage_advanced</code></td><td>阶段收口后自动生成总结 → 知识库 ingest</td><td>⏳ TODO</td></tr>
+    <tr><td>④</td><td><code>auditMiddleware</code></td><td>全部事件</td><td>全量事件落本地审计日志（备查）</td><td>⏳ TODO</td></tr>
+    <tr><td>⑤</td><td><code>tokenStatMiddleware</code></td><td><code>task_completed / stage_advanced</code></td><td>按 <code>trace_id / agent_role</code> 聚合 token 消耗</td><td>⏳ TODO</td></tr>
+  </table>
+  <div class="note">代码入口：<code>src/agent/lifecycle.ts</code>（管道 + <code>useAgentMiddleware</code> + <code>emitAgentEvent</code>）· <code>src/agent/middlewares/index.ts</code>（注册中心，加中间件改这里）· <code>src/agent/middlewares/hookMiddleware.ts</code>（中间件①实现）。agent 侧（<code>workerPoll</code> / <code>orchestratorCollect</code>）入口调 <code>initAgentMiddlewares()</code>，完成时调 <code>emitAgentEvent(ctx)</code>。</div>
+  <div class="note warn">对比改造前后：以前 workerPoll 和 orchestratorCollect 各自调 <code>reportAgentComplete</code>，加评审/总结要两处都改；现在两者只调 <code>emitAgentEvent</code>，加新关注点只在 <code>middlewares/index.ts</code> 注册一行，<b>agent 代码零改动</b>。</div>
+
   <!-- 数据流 -->
   <h2>数据流</h2>
 
@@ -228,6 +288,130 @@
   <div class="step k"><div class="num">W</div><div class="body"><b>写入总结（执行后）</b>：Worker 执行完成后、回传结果前，向知识库发<b>写入请求</b>，把本次的总结知识（做了什么、踩了什么坑、可复用的模式）沉淀进去。编排者收口后也可写入整体总结。</div></div>
 
   <div class="note">知识库中间层是<b>黑盒</b>：系统只约定"查询 / 写入"两个交互方向与请求/响应字段，内部存储、检索算法、向量化等一概不关心，可按需替换实现。</div>
+
+  <!-- 端到端链路追踪 -->
+  <h2>端到端链路追踪（trace_id 贯穿 + 每步容错）</h2>
+  <p>一条需求从输入主 Agent 到被分发到的角色 Agent 处理，全程用<b>链路唯一 ID（trace_id）</b>串起来；每一步都通过 <b>Agent 完成 Hook</b> 把事件上报到黑盒后端（<b>不再本地保存状态文件</b>），任何一步出错都有对应的容错动作。这条链路是本系统的主干，比"数据流"更具体地展示了<b>一个请求的完整生命周期与容错路径</b>。</p>
+
+  <h3>① 三级 ID 体系</h3>
+  <table>
+    <tr><th>ID</th><th>谁生成</th><th>粒度</th><th>用途</th></tr>
+    <tr><td><code>trace_id</code></td><td>Orchestrator（需求输入时）</td><td><b>一条需求一条</b>，贯穿 PM→Dev→Review→QA→Deploy 全程</td><td>链路唯一标识，串联所有阶段/子任务/事件；这是用户给的"链路唯一 ID"</td></tr>
+    <tr><td><code>parent_task_id</code></td><td>Orchestrator（每阶段切换时）</td><td>一个阶段一个</td><td>该阶段所有并行子任务的共同父 ID，便于阶段级聚合</td></tr>
+    <tr><td><code>task_id</code></td><td>Orchestrator（分发每个子任务时）</td><td>一个子任务一个</td><td>Kafka 消息 key 之一、worker 去重、结果回传对账</td></tr>
+  </table>
+  <p class="sub">关系：<code>trace_id</code> 1 → N <code>parent_task_id</code>（每阶段 1 个）→ N <code>task_id</code>（阶段内并行子任务）。所有 Kafka 消息（task / result / control）都带 <code>trace_id</code>，worker 也会把 <code>trace_id</code> 写进产出文件头。</p>
+
+  <h3>② 数据流转图（参与的 Agent 与黑盒系统交互）</h3>
+  <div class="diagram">
+    <!-- L1 输入 -->
+    <div class="layer">
+      <div class="node" style="border-color:#64748b;background:rgba(100,116,139,.1);max-width:440px">
+        <div class="t">📥 原始输入</div>
+        <div class="d">doc / docx / pdf / 企业微信消息 / 手动输入</div>
+      </div>
+    </div>
+    <div class="vline">↓</div>
+    <!-- L2 markitdown 黑盒 -->
+    <div class="layer">
+      <div class="node" style="border-color:#fb923c;background:rgba(251,146,60,.1);max-width:440px">
+        <div class="t">📥 黑盒① · markitdown（输入清洗）</div>
+        <div class="d">仅 Orchestrator 调用 → 产出清洗后 .md<br><span class="pill" style="font-size:10px;opacity:.6">— 无 Token</span></div>
+      </div>
+    </div>
+    <div class="vline">↓ 清洗后 .md 喂给主 Agent</div>
+    <!-- L3 主 Agent + 知识库 + Hook -->
+    <div class="layer" style="gap:18px;align-items:stretch">
+      <div class="node n-kb" style="max-width:170px">
+        <div class="t">🧠 黑盒② · 知识库</div>
+        <div class="d">query 历史经验<br>（辅助拆解）<br><span class="pill" style="font-size:10px;opacity:.6">— 系统侧无 Token</span></div>
+      </div>
+      <div class="node n-trae" style="max-width:230px">
+        <div class="t">🧠 主 Agent<br>Orchestrator（TRAE-A）</div>
+        <div class="d">生成 trace_id · 拆任务<br>分发 · 收口 · 推进状态机<br><span class="pill" style="border-color:#fbbf24;color:#fbbf24;font-size:10px">🔤 消耗 Token</span></div>
+      </div>
+      <div class="node" style="border-color:#34d399;background:rgba(52,211,153,.1);max-width:170px">
+        <div class="t">📡 黑盒③ · Hook 后端</div>
+        <div class="d">stage_progress 上报<br><span class="pill" style="font-size:10px;opacity:.6">— 无 Token</span></div>
+      </div>
+    </div>
+    <div class="vline" style="font-size:12px">query ↔ &nbsp;主 Agent&nbsp; → hook: stage_progress ↘ &nbsp;&nbsp; ↓ produce tasks（带 trace_id）</div>
+    <!-- L4 Kafka -->
+    <div class="layer">
+      <div class="node n-kafka" style="max-width:580px">
+        <div class="t">黑盒④ · Kafka 消息总线</div>
+        <div class="d">agent-tasks · agent-results · agent-control（所有消息带 trace_id）<br><span class="pill" style="font-size:10px;opacity:.6">— 无 Token（TS 脚本 I/O）</span></div>
+      </div>
+    </div>
+    <div class="vline" style="font-size:12px">↓ consume tasks &nbsp;&nbsp; ↑ publish results</div>
+    <!-- L5 角色 Agent + 知识库 + Hook -->
+    <div class="layer" style="gap:18px;align-items:stretch">
+      <div class="node n-kb" style="max-width:170px">
+        <div class="t">🧠 黑盒② · 知识库</div>
+        <div class="d">执行前 query<br>执行后 ingest<br><span class="pill" style="font-size:10px;opacity:.6">— 系统侧无 Token</span></div>
+      </div>
+      <div class="node n-worker" style="max-width:250px">
+        <div class="t">角色 Agent ×5 并行</div>
+        <div class="d">pm · dev · review · qa · deploy<br>TRAE-B / TRAE-C<br>trae-cli 执行角色职责<br><span class="pill" style="border-color:#fbbf24;color:#fbbf24;font-size:10px">🔤 消耗 Token（主要）</span></div>
+      </div>
+      <div class="node" style="border-color:#34d399;background:rgba(52,211,153,.1);max-width:170px">
+        <div class="t">📡 黑盒③ · Hook 后端</div>
+        <div class="d">agent_complete 上报<br><span class="pill" style="font-size:10px;opacity:.6">— 无 Token</span></div>
+      </div>
+    </div>
+    <div class="vline" style="font-size:12px">query/ingest ↔ &nbsp;角色 Agent&nbsp; → hook: agent_complete ↘ &nbsp;&nbsp; ↑ publish results</div>
+    <!-- L6 回流 -->
+    <div class="layer">
+      <div class="pill" style="max-width:700px">agent-results → Orchestrator consumeResults → 阶段收口 → hook: stage_progress → 推进下一阶段（PM→Dev→Review→QA→Deploy）</div>
+    </div>
+  </div>
+  <p class="sub"><b>4 个黑盒系统</b>：①markitdown 输入清洗、②知识库 query/ingest、③Hook 后端上报执行详情、④Kafka 消息总线。<b>2 类 Agent</b>：主 Agent（Orchestrator，唯一）+ 角色 Agent（5 个，可多实例并行）。所有交互都带 trace_id，事件最终都汇聚到 Hook 黑盒后端，<b>本地不再保存链路状态文件</b>。</p>
+
+  <h3>③ 一条链路的完整时间轴（从 nio.pdf 到 dev 处理完成）</h3>
+  <p class="sub">标记说明：<span class="pill" style="border-color:#fbbf24;color:#fbbf24;font-size:10px">🔤 消耗 Token</span> = 该步骤调 LLM 消耗 token；<span class="pill" style="font-size:10px;opacity:.6">— 无 Token</span> = 纯脚本/人工/黑盒 I/O，不消耗系统 token。</p>
+  <div class="step k"><div class="num" style="background:#fb923c">0</div><div class="body"><b>需求输入</b>：用户把 <code>nio.pdf</code> 交给 Orchestrator/TRAE-A。生成 <code>trace_id=tr-20260803-0001</code>，<b>hook 上报</b> <code>trace_created</code>。<span class="pill" style="font-size:10px;opacity:.6;margin-left:6px">— 无 Token</span></div></div>
+  <div class="step k"><div class="num" style="background:#fb923c">0.1</div><div class="body"><b>markitdown 清洗</b>：<code>normalizeInput.ts nio.pdf</code> → <code>runtime/input-clean/nio.pdf.md</code>，<b>hook 上报</b> <code>normalized</code>（带 <code>converted</code> 标志）。<span class="pill" style="font-size:10px;opacity:.6;margin-left:6px">— 无 Token（格式转换）</span></div></div>
+  <div class="step t"><div class="num">1</div><div class="body"><b>进入 PM 阶段</b>：Orchestrator 把清洗后的 .md 喂给 PM 角色，生成 <code>parent_task_id=p-...-0001</code> + <code>task_id=t-...-0001</code>，<code>produceTask</code> 投 <code>agent-tasks</code>，<b>hook 上报</b> <code>produced</code>。<span class="pill" style="border-color:#fbbf24;color:#fbbf24;font-size:10px;margin-left:6px">🔤 消耗 Token（主 Agent 拆任务）</span></div></div>
+  <div class="step t"><div class="num">2</div><div class="body"><b>Worker 拉取</b>：worker-B 计划任务触发 <code>workerPoll</code>，<code>consumeTasksForWorker</code> 拉到 <code>t-...-0001</code>，渲染 inbox <code>.md</code>，<b>hook 上报</b> <code>consumed</code>。<span class="pill" style="font-size:10px;opacity:.6;margin-left:6px">— 无 Token（Kafka I/O）</span></div></div>
+  <div class="step t"><div class="num">3</div><div class="body"><b>Worker 执行前</b>：向知识库 query 本次需要的知识，注入任务 <code>.md</code>。<b>hook 上报</b> <code>running</code>。<span class="pill" style="font-size:10px;opacity:.6;margin-left:6px">— 系统侧无 Token（黑盒内部自理）</span></div></div>
+  <div class="step t"><div class="num">4</div><div class="body"><b>Worker 执行</b>：<code>trae-cli run --file t-...-0001.md --output ...</code> 跑 PM 角色职责，产出 <code>pm.md</code>（PRD+任务卡+DAG）。<span class="pill" style="border-color:#fbbf24;color:#fbbf24;font-size:10px;margin-left:6px">🔤 消耗 Token（主要，角色 Agent 调 LLM）</span></div></div>
+  <div class="step t"><div class="num">5</div><div class="body"><b>Worker 执行后</b>：把本次总结 ingest 进知识库；写 outbox 结果 JSON（含 <code>trace_id</code>）。<span class="pill" style="font-size:10px;opacity:.6;margin-left:6px">— 系统侧无 Token</span></div></div>
+  <div class="step t"><div class="num">6</div><div class="body"><b>结果回传 + 双 hook</b>：worker <b>hook 上报</b> <code>agent_complete</code>（角色 agent 做完了，<b>携带本次 token_usage</b>）→ <code>publishPendingResults</code> 投 <code>agent-results</code> → Orchestrator <code>consumeResults</code> → <b>hook 上报</b> <code>stage_progress</code>（主 agent 收到了）。<span class="pill" style="font-size:10px;opacity:.6;margin-left:6px">— 无 Token（上报本身不消耗；token_usage 随 payload 推送）</span></div></div>
+  <div class="step t"><div class="num">7</div><div class="body"><b>门禁① PRD 评审</b>：人工确认需求边界与拆解合理性，通过则 <b>hook 上报</b> <code>gate_passed</code>，推进 Dev；不通过则 <code>gate_rejected</code>，等待人工放行或退回 PM。<span class="pill" style="font-size:10px;opacity:.6;margin-left:6px">— 无 Token（人工评审）</span></div></div>
+  <div class="step t"><div class="num">8</div><div class="body"><b>进入 Dev 阶段（并行分发）</b>：Orchestrator 按 PM 产出的任务卡，生成 N 个 dev 子任务（<code>t-...-0002</code> 给 worker-B、<code>t-...-0003</code> 给 worker-C），逐个 <code>produceTask</code>，<b>hook 上报</b> <code>produced</code>×N。<span class="pill" style="border-color:#fbbf24;color:#fbbf24;font-size:10px;margin-left:6px">🔤 消耗 Token（主 Agent 拆 N 个子任务）</span></div></div>
+  <div class="step t"><div class="num">9</div><div class="body"><b>多个 Worker 并行处理</b>：worker-B/C 各自走步骤 2→6（拉取→query→trae-cli→ingest→回传）。每个 result 回来都产生 <code>agent_complete</code> + <code>stage_progress</code> 两条 hook。<span class="pill" style="border-color:#fbbf24;color:#fbbf24;font-size:10px;margin-left:6px">🔤 消耗 Token（N 个角色 Agent 并行调 LLM）</span></div></div>
+  <div class="step t"><div class="num">10</div><div class="body"><b>阶段收口</b>：Orchestrator 对账该阶段所有 <code>task_id</code> 全部 <code>success</code> → 推进 Review；若有 <code>failed</code> → 触发容错（见下表）。<span class="pill" style="border-color:#fbbf24;color:#fbbf24;font-size:10px;margin-left:6px">🔤 消耗 Token（主 Agent 收口聚合）</span></div></div>
+  <div class="step t"><div class="num">…</div><div class="body"><b>后续 Review / QA / Deploy</b>：同样按"分发→拉取→执行→回传→收口"推进，每步都 hook 上报，直到 <code>trace_closed</code>。<span class="pill" style="border-color:#fbbf24;color:#fbbf24;font-size:10px;margin-left:6px">🔤 消耗 Token（主 Agent 拆任务 + 角色 Agent 执行 + 收口）</span></div></div>
+
+  <h3>④ 每一步出错的对应处理机制</h3>
+  <table>
+    <tr><th>出错点</th><th>检测方式</th><th>处理机制</th><th>hook 上报事件</th></tr>
+    <tr><td>markitdown 清洗失败/不可用</td><td>normalizeInput 返回 <code>ok=false</code></td><td>原样拷贝为 .md 继续喂 LLM，<b>不中断</b></td><td><code>normalized</code> 带 <code>converted=false, error=...</code>，链路继续</td></tr>
+    <tr><td>任务消息校验不通过</td><td><code>validateTaskMessage</code> 抛 ValidationError</td><td>拒绝投递，进死信 <code>runtime/state/_dlq/</code>，不触发执行</td><td><code>validation_failed</code>，附错误明细</td></tr>
+    <tr><td>Kafka 不可达（投递时）</td><td>producer 超时/连接错误</td><td>暂停分发 + 告警，待恢复后续传</td><td><code>produce_failed</code>，retry 由人触发或恢复后自动续</td></tr>
+    <tr><td>Worker 拉取后崩溃 / trae-cli 执行失败</td><td>退出码非 0 → 结果 <code>status=failed</code></td><td>结果照常回传（带 error），Orchestrator 收到后：Dev 阶段 → 回退重做；其他阶段 → 升级人工</td><td><code>agent_complete(status=failed)</code> → <code>stage_progress</code> → <code>retry_scheduled</code> 或 <code>escalated</code></td></tr>
+    <tr><td>Worker 离线 / result 长时间未回传</td><td>Orchestrator 按 <code>timeout_sec</code> 检测未回执</td><td>标记该 <code>task_id</code> 超时，重试 1 次；仍失败 → 回退 Dev 或升级人工</td><td><code>timeout</code> → <code>retry_scheduled</code> / <code>escalated</code></td></tr>
+    <tr><td>Review 不通过</td><td>结果 <code>status=failed</code> + 问题清单</td><td>回退 Dev 阶段重做，重新 <code>produceTask</code></td><td><code>stage_rolled_back(dev→dev)</code> + <code>retry_scheduled</code></td></tr>
+    <tr><td>重做超 3 轮仍未通过</td><td>重做计数 &gt;= 3</td><td>停止重做，升级人工决策</td><td><code>escalated</code>，链路暂停等人</td></tr>
+    <tr><td>门禁未通过</td><td>人工评审拒绝</td><td>状态机暂停，等待人工放行或退回上一阶段</td><td><code>gate_rejected</code></td></tr>
+    <tr><td>workerPoll 重入</td><td>文件锁 <code>worker.lock</code> 占用</td><td>直接退出，不并发执行</td><td>（worker 侧本地日志，不上报 hook）</td></tr>
+    <tr><td>收口对账缺失 result</td><td>Orchestrator 对账 <code>task_id</code> 集合</td><td>对缺失项按"超时未回传"处理</td><td><code>result_missing</code> → 走超时分支</td></tr>
+    <tr><td>Hook 后端不可达</td><td><code>reportAgentComplete</code> POST 失败/超时</td><td>payload 落 <code>runtime/hooks/_failed/</code>，<b>不中断主链路</b>，可后续补发</td><td>（本地落盘待补发；后端恢复后重发）</td></tr>
+  </table>
+
+  <div class="note">核心原则：<b>每一步都通过 hook 上报 + 都有容错动作</b>。trace_id 是唯一索引，所有事件都汇聚到 Hook 黑盒后端——任何一步出错都能从后端按 trace_id 定位到具体 stage / task_id / event，并触发对应处理（重试 / 回退 / 升级 / 死信 / 人工门禁）。<b>本地不再保存链路状态文件</b>，链路可观测性完全由 Hook 后端承担。</div>
+  <div class="note warn">容错边界：重试最多 1 次、回退重做最多 3 轮，超出即升级人工（<code>escalated</code>），<b>不会无限自动循环</b>；Kafka/worker 故障期间链路暂停而非丢失，恢复后按 offset 续传；Hook 后端故障期间事件落本地 <code>runtime/hooks/_failed/</code> 待补发，主链路不受影响。</div>
+
+  <h3>⑤ Token 消耗点与推送（随 hook 上报）</h3>
+  <p>系统只在"主 Agent 喂 LLM 拆任务/收口"和"角色 Agent 调 LLM 执行"时消耗 token；其余步骤（markitdown 清洗、Kafka I/O、知识库 query/ingest、hook 上报、校验/死信、人工门禁）均<b>不消耗系统 token</b>。所有 token 消耗量都随 <code>agent_complete</code> / <code>stage_progress</code> hook 推送到黑盒后端（字段 <code>metrics.token_usage</code>）。</p>
+  <table>
+    <tr><th>消耗点</th><th>触发方</th><th>消耗谁的 LLM token</th><th>token_usage 来源</th><th>随哪个 hook 推送</th></tr>
+    <tr><td>拆任务 + 生成 directive</td><td>主 Agent（Orchestrator）</td><td>TRAE-A 账号</td><td>Orchestrator 会话末尾读取</td><td><code>stage_progress</code></td></tr>
+    <tr><td>角色职责执行（pm/dev/review/...）</td><td>角色 Agent（worker）</td><td>TRAE-B/C 账号</td><td>trae-cli 输出 → outbox 结果 JSON 的 <code>metrics</code></td><td><code>agent_complete</code></td></tr>
+    <tr><td>阶段收口聚合</td><td>主 Agent（Orchestrator）</td><td>TRAE-A 账号</td><td>Orchestrator 收口会话末尾读取</td><td><code>stage_progress</code></td></tr>
+  </table>
+  <div class="note">token 推送链路：角色 Agent 执行 → trae-cli 输出 token_usage → 写入 outbox 结果 JSON 的 <code>metrics.token_usage</code> → <code>buildAgentCompletePayload</code> 读出 → 随 <code>agent_complete</code> hook POST 到 <code>AGENT_HOOK_URL</code>。主 Agent 的拆任务/收口 token 同理随 <code>stage_progress</code> 推送。黑盒后端可按 <code>trace_id</code> 聚合整条链路的总 token 消耗（主 Agent + 各角色 Agent 之和）。</div>
+  <div class="note warn">不消耗系统 token 的步骤：markitdown（格式转换）、Kafka I/O、知识库 query/ingest（黑盒内部若用 embedding 属于黑盒自理，不计入系统）、hook 上报（HTTP POST）、校验/死信、人工门禁。这些步骤的 hook 上报 <code>metrics</code> 可省略或为 0。</div>
 
   <!-- 消息契约 -->
   <h2>消息契约（Kafka 消息体）</h2>
@@ -321,6 +505,48 @@
 
   <div class="note warn">黑盒边界：以上请求/响应字段仅为系统侧约定。知识库内部如何存储、检索、向量化、衰减，均不影响主链路，可独立演进或替换。</div>
 
+  <!-- Agent 完成 Hook -->
+  <h2>Agent 完成 Hook（统一管理层 · 中间件①）</h2>
+  <p>本中间件已收拢进 <a href="#" style="color:var(--accent)">Agent 统一管理层</a>（管道中间件①）。<b>每个 agent 任务完成后</b>经 <code>emitAgentEvent</code> 管道分发到此中间件，把本次详情 POST 到黑盒后端（<code>AGENT_HOOK_URL</code>）。与知识库 ingest 的区别：知识库存"精炼经验"，Hook 存"执行详情"（审计/监控/BI 用）。黑盒实现任意，系统侧只约定接口。</p>
+
+  <h3>触发点（每个 agent 都有）</h3>
+  <table>
+    <tr><th>触发方</th><th>时机</th><th>event</th><th>agent_role</th><th>含义</th></tr>
+    <tr><td>角色 Agent（worker 侧）</td><td><code>triggerTrae</code> 跑完之后、<code>publishResults</code> 之前</td><td><code>agent_complete</code></td><td><code>pm / dev / review / qa / deploy</code></td><td>一个角色 agent 完成了它的子任务</td></tr>
+    <tr><td>主 Agent（Orchestrator 侧）</td><td><code>orchestratorCollect</code> 拉到新 result 之后</td><td><code>stage_progress</code></td><td><code>orchestrator</code></td><td>主 agent 收到一条子任务结果，阶段推进</td></tr>
+  </table>
+  <p class="sub">两次上报视角不同、不重复：worker 上报"我（角色）做完了"，orchestrator 上报"我（主）收到了"。同一条 result 会产生 2 条 hook 记录，分别代表两个 agent 的完成事件。</p>
+
+  <h3>上报载荷 · HookPayload</h3>
+<pre><code>→ POST {AGENT_HOOK_URL}            // 例: http://192.168.1.10:8080/agent-hook/complete
+{
+  "event": "agent_complete",       // agent_complete（角色）| stage_progress（主 agent）
+  "trace_id": "tr-20260803-0001",  // 链路唯一 ID，贯穿整条链路
+  "task_id": "t-20260803-0002",
+  "parent_task_id": "p-20260803-0002",
+  "agent_role": "dev",             // orchestrator | pm | dev | review | qa | deploy
+  "worker_id": "worker-B",
+  "stage": "dev",                  // 任务所属阶段（主 agent 的 stage_progress 可省略）
+  "status": "success",             // success | failed | partial
+  "summary": "在 user.ts login/logout 增加结构化日志，新增 logger.ts。",
+  "artifacts": ["src/user.ts", "src/logger.ts"],
+  "metrics": { "duration_sec": 87, "token_usage": { "input": 1234, "output": 567 } },  // ← token 消耗量随 hook 推送（按 trace_id 聚合）
+  "error": "",
+  "completed_at": "2026-08-03T09:05:27Z"
+}
+← 200
+{ "accepted": true, "id": "hk-7788" }</code></pre>
+
+  <h3>容错与配置</h3>
+  <div class="grid cards">
+    <div class="card"><h3>未配置 = no-op</h3><p><code>AGENT_HOOK_URL</code> 为空时 <code>reportAgentComplete</code> 直接返回，不报错、不落盘。系统默认能跑，Hook 是可选增强。</p></div>
+    <div class="card"><h3>失败不中断</h3><p>POST 失败/超时（10s）→ 把 payload 写入 <code>runtime/hooks/_failed/&lt;ts&gt;-&lt;task_id&gt;.json</code>，<b>绝不抛错</b>，主链路（produce/consume/publish）照常继续。</p></div>
+    <div class="card"><h3>主 agent 去重</h3><p>orchestratorCollect 周期扫描 results/ 目录，用 <code>runtime/state/hooked.jsonl</code> 记录已上报 task_id，避免重复 POST。</p></div>
+    <div class="card"><h3>角色 agent 兜底</h3><p>worker 侧 triggerTrae 异常或 outbox 结果文件缺失时，构造 <code>status=failed</code> 的 payload 照常上报，确保"失败"也能被黑盒感知。</p></div>
+  </div>
+
+  <div class="note warn">黑盒边界：系统侧只约定 <code>POST {AGENT_HOOK_URL}</code> 与上述字段。后端如何存储、索引、告警、聚合，均不影响主链路，可独立演进或替换（审计系统 / 监控平台 / BI / 数据仓库 皆可）。</div>
+
   <!-- 部署 -->
   <h2>部署与运行</h2>
   <table>
@@ -332,6 +558,7 @@
     <tr><td>5</td><td>编排者</td><td>在 TRAE 里按 <code>skills/orchestrator.md</code> 拆任务 → <code>produceTask</code> 投递</td></tr>
     <tr><td>6</td><td>Worker</td><td><code>npx tsx src/deploy/registerTasks.ts</code> 注册计划任务，每 N 分钟自动拉取→执行→回传</td></tr>
     <tr><td>7</td><td>知识库</td><td>部署黑盒服务，向 Worker/编排者暴露 <code>/knowledge/query</code> 与 <code>/knowledge/ingest</code>（实现自定）</td></tr>
+    <tr><td>8</td><td>Hook 后端</td><td>部署黑盒服务接收 <code>POST {AGENT_HOOK_URL}</code>；各 TRAE 机器 <code>settings.env</code> 填 <code>AGENT_HOOK_URL</code>（留空则 no-op）</td></tr>
   </table>
 
   <!-- 设计要点 -->
@@ -345,7 +572,7 @@
     <div class="card"><h3>可沉淀</h3><p>知识库中间层把每次任务的总结转化为可召回资产，执行前查询注入，让 Worker 越做越聪明。</p></div>
   </div>
 
-  <p class="sub" style="margin-top:40px">文件清单：orchestrator/normalizeInput（markitdown 输入清洗） · broker/（kafkaHelper · createTopics · produceTask · consumeTasks · publishResults · consumeResults · validate · selftest） · triggers/（triggerTrae · workerPoll · orchestratorCollect） · deploy/registerTasks · skills/（orchestrator · worker_task_template） · config/（settings.env · workers.yaml） · docs/（architecture.html · agents-system.md）</p>
+  <p class="sub" style="margin-top:40px">文件清单：agent/（lifecycle · middlewares/hookMiddleware · middlewares/index · index）· orchestrator/normalizeInput（markitdown 输入清洗） · broker/（kafkaHelper · createTopics · produceTask · consumeTasks · publishResults · consumeResults · validate · selftest · hookReport） · triggers/（triggerTrae · workerPoll · orchestratorCollect） · deploy/registerTasks · skills/（orchestrator · worker_task_template） · config/（settings.env · workers.yaml） · docs/（architecture.html · agents-system.md）</p>
 
 </div>
 </body>

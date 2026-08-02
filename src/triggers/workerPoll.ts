@@ -6,8 +6,10 @@ import { consumeTasksForWorker } from '../broker/consumeTasks';
 import { publishPendingResults } from '../broker/publishResults';
 import { getKafka, CONTROL_TOPIC } from '../broker/kafkaHelper';
 import { validateControlMessage } from '../broker/validate';
+import { initAgentMiddlewares, emitAgentEvent } from '../agent';
+import type { AgentContext } from '../agent';
 import { triggerTrae } from './triggerTrae';
-import { TaskMessage, ControlMessage } from '../types';
+import { TaskMessage, TaskResult, ControlMessage } from '../types';
 
 /**
  * 检测 CONTROL_TOPIC 中针对本 worker 的最新控制信号。
@@ -114,12 +116,50 @@ export async function workerPoll(): Promise<void> {
           await fs.promises.readFile(path.join(inboxDir, f), 'utf8')
         ) as TaskMessage;
         console.log(`[workerPoll] 执行 ${task.task_id}`);
+        let triggerError: string | undefined;
         try {
           await triggerTrae(task);
         } catch (e) {
+          triggerError = e instanceof Error ? e.message : String(e);
           console.error(
-            `[workerPoll] triggerTrae 失败 ${task.task_id}: ${e instanceof Error ? e.message : String(e)}`
+            `[workerPoll] triggerTrae 失败 ${task.task_id}: ${triggerError}`
           );
+        }
+
+        // 读 outbox 结果，组装统一上下文，经 Agent 统一管理层管道分发
+        // （hook/评审/总结/审计等中间件都在管道里，agent 代码只调 emitAgentEvent）
+        const resultPath = path.isAbsolute(task.expected_output.result_file)
+          ? task.expected_output.result_file
+          : path.resolve(process.cwd(), task.expected_output.result_file);
+        let result: TaskResult | null = null;
+        try {
+          if (fs.existsSync(resultPath)) {
+            result = JSON.parse(
+              await fs.promises.readFile(resultPath, 'utf8')
+            ) as TaskResult;
+          }
+        } catch {
+          /* ignore：读不到结果就走 failed 兜底 */
+        }
+        const ctx: AgentContext = {
+          trace_id: task.trace_id,
+          task_id: task.task_id,
+          parent_task_id: task.parent_task_id,
+          agent_role: task.type,
+          worker_id: task.worker_id,
+          stage: task.type,
+          event: 'task_completed',
+          status: result?.status ?? 'failed',
+          summary: result?.summary,
+          artifacts: result?.artifacts,
+          metrics: result?.metrics,
+          error: result?.error ?? triggerError ?? 'result file missing',
+          completed_at: result?.completed_at ?? new Date().toISOString(),
+        };
+        try {
+          await emitAgentEvent(ctx);
+        } catch {
+          /* 管道失败不影响主流程（中间件内部已各自兜底） */
         }
       }
       await publishPendingResults(workerId);
@@ -144,6 +184,7 @@ export async function workerPoll(): Promise<void> {
 }
 
 if (require.main === module) {
+  initAgentMiddlewares();
   workerPoll().catch((e) => {
     console.error(e);
     process.exit(1);
