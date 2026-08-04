@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>AgentPulse · TRAE 插件 UI 原型（主 Agent 指挥台 / 子 Agent 工作台）</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel2:#273449; --ink:#e2e8f0; --muted:#94a3b8;
+    --line:#334155; --accent:#38bdf8; --accent2:#a78bfa; --good:#34d399; --warn:#fbbf24;
+    --danger:#f87171; --orange:#fb923c; --purple:#a78bfa; --gray:#64748b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#0b1220;color:var(--ink);font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;font-size:13px;line-height:1.55;display:flex;justify-content:center;padding:24px}
+  .ide{width:1440px;max-width:100%;background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .winbar{background:var(--panel2);padding:6px 14px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line)}
+  .winbar .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .winbar .dot.r{background:#f87171}.winbar .dot.y{background:#fbbf24}.winbar .dot.g{background:#34d399}
+  .winbar .title{margin-left:6px}
+  .winbar .path{flex:1;text-align:center}
+  .winbar .badge{font-size:11px;background:#0b1220;border:1px solid var(--line);border-radius:6px;padding:1px 8px;color:var(--accent)}
+  .body{display:flex;min-height:660px}
+  /* 活动栏 */
+  .activity{width:48px;background:var(--panel2);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding-top:8px;gap:4px}
+  .activity .ic{width:38px;height:38px;display:flex;align-items:center;justify-content:center;font-size:20px;border-radius:8px;cursor:pointer;opacity:.6;position:relative}
+  .activity .ic:hover{opacity:1;background:var(--panel)}
+  .activity .ic.on{opacity:1;background:var(--panel);border-left:2px solid var(--accent)}
+  .activity .ic .tag{position:absolute;bottom:-1px;right:1px;font-size:9px;background:var(--accent);color:#0b1220;border-radius:4px;padding:0 3px;font-weight:700}
+  .activity .spacer{flex:1}
+  /* ============ 视图容器 ============ */
+  #view-main,#view-worker{flex:1;display:flex;min-width:0}
+  /* ============ 视图① 主 Agent 指挥台 ============ */
+  .sidebar{width:300px;min-width:300px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .side-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
+  .side-head .t{font-weight:700;flex:1}
+  .side-head button{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:12px}
+  .side-head button:hover{color:var(--ink);border-color:var(--accent)}
+  .search{margin:10px 12px;padding:6px 10px;background:#0b1220;border:1px solid var(--line);border-radius:8px;color:var(--muted);font-size:12px}
+  .tree{flex:1;overflow:auto;padding:4px 6px}
+  .tree-node{cursor:pointer;border-radius:6px;padding:3px 8px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .tree-node:hover{background:var(--panel2)}
+  .tree-node .lvl1{font-weight:600}
+  .tree-node .prog{margin-left:auto;font-size:11px;color:var(--muted)}
+  .tree-children{margin-left:14px;border-left:1px dashed var(--line);padding-left:6px}
+  .side-foot{border-top:1px solid var(--line);padding:8px 12px;font-size:12px;display:flex;gap:12px;color:var(--muted);flex-wrap:wrap}
+  .st{font-size:11px;border-radius:6px;padding:1px 7px;border:1px solid var(--line)}
+  .main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+  .toolbar{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}
+  .toolbar .t{font-weight:700;font-size:14px}
+  .toolbar .grow{flex:1}
+  .sel{font-size:12px;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:3px 10px;cursor:pointer}
+  .stats{display:flex;gap:10px;padding:10px 14px;flex-wrap:wrap}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 14px;font-size:12px;display:flex;align-items:center;gap:8px}
+  .stat b{font-size:18px}
+  .stat .k{color:var(--muted)}
+  .pipeline{padding:4px 14px;overflow:auto;flex:1}
+  .trace-block{border:1px solid var(--line);border-radius:12px;margin-bottom:12px;background:var(--panel);overflow:hidden}
+  .trace-head{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--panel2);border-bottom:1px solid var(--line)}
+  .trace-head .id{font-weight:700;font-size:12px;color:var(--accent)}
+  .trace-head .title{color:var(--ink);font-size:12px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .trace-head .team{font-size:11px;background:#0b1220;border:1px solid var(--line);border-radius:6px;padding:1px 8px;color:var(--accent2)}
+  .trace-head .prog{font-size:11px;color:var(--muted)}
+  .lanes{display:flex;align-items:stretch;padding:12px 10px 8px}
+  .lane{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+  .lane-head{display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;font-weight:700;padding-bottom:6px;border-bottom:2px solid var(--line)}
+  .lane-body{display:flex;flex-direction:column;gap:6px;padding-top:8px;align-items:center}
+  .connector{flex:0 0 46px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:0}
+  .arrow{font-size:20px;color:var(--good);font-weight:700;line-height:1}
+  .gate{font-size:10px;text-align:center;border-radius:6px;padding:2px 6px;border:1px solid var(--line);background:#0b1220;white-space:nowrap}
+  .gate.pass{border-color:var(--good);color:var(--good)}
+  .gate.wait{border-color:var(--purple);color:var(--purple)}
+  .gate.fail{border-color:var(--danger);color:var(--danger)}
+  .card{width:92%;max-width:150px;border-radius:8px;border:1px solid var(--line);padding:6px 8px;background:#0b1220;cursor:pointer;transition:transform .12s}
+  .card:hover{transform:translateY(-2px);border-color:var(--accent)}
+  .card.pending{border-left:3px solid var(--gray)}
+  .card.running{border-left:3px solid var(--accent);animation:pulse 1.6s ease-in-out infinite}
+  .card.success{border-left:3px solid var(--good)}
+  .card.failed{border-left:3px solid var(--danger)}
+  .card.gated{border-left:3px solid var(--purple)}
+  .card.rolled{border-left:3px solid var(--orange)}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(56,189,248,0)}50%{box-shadow:0 0 10px 1px rgba(56,189,248,.35)}}
+  .card .row{display:flex;align-items:center;gap:4px;font-size:11px}
+  .card .task{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  .card .wb{font-size:10px;background:var(--panel2);border-radius:4px;padding:0 4px;color:var(--muted)}
+  .card .sub{font-size:10px;color:var(--muted);margin-top:3px}
+  .empty{width:92%;max-width:150px;border:1px dashed var(--line);border-radius:8px;padding:10px 6px;text-align:center;font-size:10px;color:var(--muted)}
+  .rollback{display:flex;align-items:center;gap:8px;margin:0 14px 10px;padding:6px 12px;border:1px dashed var(--orange);border-radius:8px;font-size:11px;color:var(--orange)}
+  .rollback .line{flex:1;height:0;border-top:1px dashed var(--orange)}
+  .events{border-top:1px solid var(--line);background:var(--panel);max-height:230px;display:flex;flex-direction:column}
+  .events-head{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--line)}
+  .events-head .t{font-weight:700;font-size:12px;flex:1}
+  .chip{font-size:11px;border:1px solid var(--line);background:#0b1220;color:var(--muted);border-radius:999px;padding:1px 10px;cursor:pointer}
+  .chip.on{color:var(--accent);border-color:var(--accent)}
+  .event-list{overflow:auto;flex:1;padding:4px 0}
+  .ev{display:flex;align-items:center;gap:8px;padding:3px 14px;font-size:12px;border-left:2px solid transparent}
+  .ev:hover{background:var(--panel2)}
+  .ev .ts{color:var(--muted);font-family:"JetBrains Mono",Consolas,monospace;font-size:11px;width:64px;flex-shrink:0}
+  .ev .trace{font-size:10px;background:var(--panel2);border-radius:4px;padding:0 6px;color:var(--muted);margin-left:auto;flex-shrink:0}
+  .ev.success{border-left-color:var(--good)} .ev.failed{border-left-color:var(--danger)}
+  .ev.gate{border-left-color:var(--purple)} .ev.rollback{border-left-color:var(--orange)}
+  .ev.produced{border-left-color:var(--accent)} .ev.running{border-left-color:var(--accent)}
+  /* ============ 视图② 子 Agent 工作台 ============ */
+  .worker-side{width:330px;min-width:330px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .idcard{display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+  .avatar{width:40px;height:40px;border-radius:10px;background:#0b1220;border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:20px}
+  .idcard .who{font-weight:700}
+  .idcard .role{font-size:11px;color:var(--muted)}
+  .idcard .live{margin-left:auto;font-size:11px;color:var(--good);white-space:nowrap}
+  .wstats{display:flex;gap:8px;padding:10px 12px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+  .wstat{flex:1;min-width:70px;background:#0b1220;border:1px solid var(--line);border-radius:8px;padding:6px 8px;text-align:center}
+  .wstat b{display:block;font-size:16px}
+  .wstat span{font-size:10px;color:var(--muted)}
+  .inbox{flex:1;overflow:auto;padding:8px}
+  .inbox-label{font-size:11px;color:var(--muted);padding:4px 6px}
+  .task-item{border:1px solid var(--line);border-radius:10px;background:#0b1220;padding:8px 10px;margin-bottom:6px;cursor:pointer;border-left:3px solid var(--gray)}
+  .task-item:hover{border-color:var(--accent)}
+  .task-item.on{border-color:var(--accent);background:#12233b}
+  .task-item.running{border-left-color:var(--accent)}
+  .task-item.success{border-left-color:var(--good)}
+  .task-item.failed{border-left-color:var(--danger)}
+  .task-item.rolled{border-left-color:var(--orange)}
+  .task-item .t1{display:flex;align-items:center;gap:6px}
+  .task-item .tid{font-weight:700;font-size:12px}
+  .task-item .st{font-size:10px;margin-left:auto}
+  .task-item .t2{font-size:11px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .task-item .t3{font-size:10px;color:var(--gray);margin-top:3px}
+  .worker-main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:auto}
+  .dhead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel2)}
+  .dhead .t{font-weight:700}
+  .dhead .id{font-size:12px;color:var(--accent)}
+  .dsec{padding:12px 16px;border-bottom:1px solid var(--line)}
+  .dsec h4{margin:0 0 8px;font-size:12px;color:var(--accent2);display:flex;align-items:center;gap:6px}
+  .dl{display:flex;gap:6px;margin:4px 0;font-size:12px}
+  .dl .k{flex:0 0 110px;color:var(--muted);font-size:11px;padding-top:1px}
+  .dl .v{flex:1}
+  .kb-item{font-size:12px;background:#0b1220;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:4px 0;display:flex;gap:8px;align-items:center}
+  .kb-item .src{margin-left:auto;font-size:10px;color:var(--gray)}
+  .exec{border:1px dashed var(--accent);border-radius:8px;background:rgba(56,189,248,.06);padding:8px 12px;font-size:12px}
+  .exec code{color:var(--accent)}
+  .rbtn{font-size:11px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:2px 10px;cursor:pointer;margin-right:6px}
+  .rbtn:hover{border-color:var(--accent)}
+  .rbtn.primary{background:var(--accent);color:#0b1220;border-color:var(--accent);font-weight:700}
+  .result-box{border:1px solid var(--good);border-radius:8px;background:rgba(52,211,153,.06);padding:8px 12px;font-size:12px}
+  /* 状态栏 */
+  #statusbar{display:flex;align-items:center;gap:14px;background:var(--accent);color:#0b1220;padding:3px 14px;font-size:12px;font-weight:600}
+  #statusbar .grow{flex:1}
+  #statusbar .right{display:flex;gap:12px;font-weight:400}
+  /* 浮层 */
+  .tip{position:fixed;background:#0b1220;border:1px solid var(--accent);border-radius:10px;padding:10px 14px;font-size:12px;box-shadow:0 10px 30px rgba(0,0,0,.6);z-index:99;max-width:320px;display:none}
+  .tip .k{color:var(--muted)}
+  /* ============ 视图③ 主 Agent 信息入口（任务工作区） ============ */
+  .intake{flex:1;display:flex;flex-direction:column;min-width:0}
+  .wizard{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .wizard .t{font-weight:700;font-size:13px;margin-right:6px}
+  .wstep{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 10px;background:#0b1220}
+  .wstep.done{color:var(--good);border-color:var(--good)}
+  .wstep.cur{color:var(--accent);border-color:var(--accent)}
+  .wstep .n{width:15px;height:15px;border-radius:50%;background:var(--panel2);display:flex;align-items:center;justify-content:center;font-size:10px}
+  .ws-body{flex:1;display:flex;min-height:0}
+  .ws-list{width:280px;min-width:280px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  .ws-list-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)}
+  .ws-list-head .t{font-weight:700;flex:1;font-size:12px}
+  .ws-list-head button{background:var(--accent);color:#0b1220;border:none;border-radius:6px;padding:2px 10px;font-weight:700;cursor:pointer;font-size:12px}
+  .ws-list-head button:hover{filter:brightness(1.1)}
+  .ws-items{flex:1;overflow:auto;padding:8px}
+  .ws-item{border:1px solid var(--line);border-radius:10px;background:#0b1220;padding:8px 10px;margin-bottom:6px;cursor:pointer}
+  .ws-item:hover{border-color:var(--accent)}
+  .ws-item.on{border-color:var(--accent);background:#12233b}
+  .ws-item .w1{display:flex;align-items:center;gap:6px}
+  .ws-item .wid{font-weight:700;font-size:12px;color:var(--accent)}
+  .ws-item .w2{font-size:11px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ws-item .w3{font-size:10px;margin-top:3px;color:var(--gray)}
+  .ws-main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .wstree{flex:1;overflow:auto;padding:12px 16px;font-size:12px}
+  .ws-folder{font-weight:700;color:var(--ink);padding:3px 4px;display:flex;align-items:center;gap:6px;cursor:pointer;border-radius:6px}
+  .ws-folder:hover{background:var(--panel)}
+  .ws-children{margin-left:16px;border-left:1px dashed var(--line);padding-left:8px}
+  .ws-file{display:flex;align-items:center;gap:6px;padding:2px 4px;border-radius:6px;cursor:pointer;color:var(--muted)}
+  .ws-file:hover{background:var(--panel);color:var(--ink)}
+  .ws-file.on{color:var(--accent);background:var(--panel)}
+  .ws-file .ok{margin-left:auto;font-size:10px;color:var(--good)}
+  .ws-file .doing{color:var(--accent);font-size:10px}
+  .ws-preview{width:360px;min-width:360px;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+  .pv-head{padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:12px}
+  .pv-head .p{color:var(--muted);font-weight:400;font-size:11px;margin-left:8px}
+  .pv-body{flex:1;overflow:auto;padding:12px 14px;font-size:12px}
+  .pv-body pre{background:#0b1220;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;color:#d7e3f4;white-space:pre-wrap;word-break:break-all}
+  .pv-line{display:flex;gap:8px;margin:4px 0}
+  .pv-line .k{flex:0 0 110px;color:var(--muted);font-size:11px}
+  /* ============ 新建任务引导模态框 ============ */
+  .mask{position:fixed;inset:0;background:rgba(2,6,23,.72);z-index:100;display:none;align-items:center;justify-content:center}
+  .modal{width:580px;max-width:94%;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.6)}
+  .modal-head{padding:14px 18px;background:var(--panel2);border-bottom:1px solid var(--line);font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px}
+  .modal-body{padding:16px 18px;font-size:13px;max-height:70vh;overflow:auto}
+  .guide{padding:0;margin:8px 0 12px;font-size:12px;color:var(--muted)}
+  .guide li{margin:7px 0;line-height:1.6}
+  .guide b{color:var(--ink)}
+  .dropdir{border:1px dashed var(--accent);border-radius:10px;background:rgba(56,189,248,.06);padding:12px 14px;margin:6px 0 12px}
+  .dropdir .cap{font-size:11px;color:var(--muted);margin-bottom:4px}
+  .dropdir .path{font-family:"JetBrains Mono",Consolas,monospace;color:var(--accent);font-size:12px;word-break:break-all}
+  .form-row{display:flex;gap:10px;margin:9px 0;align-items:center}
+  .form-row label{flex:0 0 88px;color:var(--muted);font-size:12px}
+  .form-row input,.form-row select{flex:1;background:#0b1220;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 10px;font-size:12px}
+  .form-row input:focus,.form-row select:focus{outline:none;border-color:var(--accent)}
+  .modal-foot{display:flex;justify-content:flex-end;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid var(--line)}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 16px;cursor:pointer;font-size:12px}
+  .btn:hover{border-color:var(--accent)}
+  .btn.primary{background:var(--accent);color:#0b1220;border-color:var(--accent);font-weight:700;font-size:13px;padding:8px 24px}
+  .btn.primary:hover{filter:brightness(1.1)}
+  /* ============ 匹配团队 / 手动指派 ============ */
+  .tchip{display:inline-flex;align-items:center;gap:6px;background:#0b1220;border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:3px 12px;font-size:12px;margin:2px 4px}
+  .tchip .x{cursor:pointer;opacity:.7}
+  .tchip .x:hover{opacity:1}
+  .tchip-add{border-style:dashed;border-color:var(--line);color:var(--muted);cursor:pointer;background:transparent}
+  .tchip-add:hover{border-color:var(--accent);color:var(--accent)}
+  .team-match{flex:1;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+  .team-match .hint{width:100%;font-size:11px;color:var(--gray)}
+  .assign-block{border:1px solid var(--line);border-radius:10px;margin:10px 0;overflow:hidden;background:#0b1220}
+  .assign-team{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--panel2);font-weight:700;font-size:12px}
+  .assign-task{font-size:11px;color:var(--muted);padding:6px 12px;border-bottom:1px solid var(--line)}
+  .member-check{display:flex;align-items:center;gap:10px;padding:8px 12px;font-size:12px;cursor:pointer}
+  .member-check:hover{background:var(--panel)}
+  .member-check input{accent-color:var(--accent)}
+  .member-check .ms{margin-left:auto;font-size:11px;color:var(--muted)}
+  .toast{position:fixed;left:50%;bottom:46px;transform:translateX(-50%);background:var(--good);color:#0b1220;font-weight:700;border-radius:10px;padding:10px 22px;font-size:13px;z-index:120;display:none;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+</style>
+</head>
+<body>
+
+<div class="ide">
+  <div class="winbar">
+    <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+    <span class="title">AgentPulse — 多 Agent 任务分发看板</span>
+    <span class="path">TRAE 插件 UI 原型 · 两套视角：主 Agent 指挥台 / 子 Agent 工作台 · 模拟数据</span>
+    <span class="badge">ext: agent-pulse v0.1</span>
+  </div>
+
+  <div class="body">
+    <!-- 活动栏：两套视角入口 -->
+    <div class="activity">
+      <div class="ic on" id="ic-main" onclick="switchView('main')" title="主 Agent · 指挥台">🚀<span class="tag">主</span></div>
+      <div class="ic" id="ic-intake" onclick="switchView('intake')" title="主 Agent · 信息入口">📥<span class="tag">入</span></div>
+      <div class="ic" id="ic-worker" onclick="switchView('worker')" title="子 Agent · 工作台">🛠<span class="tag">子</span></div>
+      <div class="spacer"></div>
+      <div class="ic" title="设置">⚙️</div>
+    </div>
+
+    <!-- ═════════ 视图① 主 Agent 指挥台（全链路 · 状态机 · 门禁 · 回退 · token 聚合） ═════════ -->
+    <div id="view-main">
+      <aside class="sidebar">
+        <div class="side-head">
+          <span class="t">🚀 指挥台 · 全链路</span>
+          <button title="刷新">⟳</button><button title="新建链路">＋</button><button title="设置">⚙</button>
+        </div>
+        <div class="search">🔍 搜索 trace_id / 团队 / 任务…</div>
+        <div class="tree">
+          <div class="tree-node lvl1" onclick="toggle(this)">▾ 📄 <b>tr-20260803-0001</b> 云门禁 → 结构化日志 <span class="prog">3/5</span></div>
+          <div class="tree-children">
+            <div class="tree-node">✅ PM &nbsp;已完成</div>
+            <div class="tree-node" onclick="toggle(this)">▾ 🔄 Dev &nbsp;2/3 执行中</div>
+            <div class="tree-children">
+              <div class="tree-node">✅ dev t-…-0002 worker-B</div>
+              <div class="tree-node">🔄 dev t-…-0003 worker-B</div>
+              <div class="tree-node">⏸ dev t-…-0004 worker-B</div>
+            </div>
+            <div class="tree-node">⏸ Review &nbsp;排队中</div>
+            <div class="tree-node">⏸ QA &nbsp;占位</div>
+            <div class="tree-node">⏸ Deploy &nbsp;占位</div>
+          </div>
+          <div class="tree-node lvl1" onclick="toggle(this)">▾ 📄 <b>tr-20260802-0007</b> 车行云 → 门禁改造 <span class="prog">2/5</span></div>
+          <div class="tree-children">
+            <div class="tree-node">✅ PM &nbsp;已完成</div>
+            <div class="tree-node">↩ Dev &nbsp;回退重做 2/3</div>
+            <div class="tree-node">❌ Review &nbsp;驳回 · 问题清单 3</div>
+            <div class="tree-node">⏸ QA &nbsp;占位</div>
+            <div class="tree-node">⏸ Deploy &nbsp;占位</div>
+          </div>
+        </div>
+        <div class="side-foot">
+          <span class="st" style="color:var(--warn)">⚠ 失败 1</span>
+          <span class="st">📭 待办 3</span>
+          <span class="st">🔴 Hook 0</span>
+          <span class="st" style="color:var(--good)">● 本地流</span>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="toolbar">
+          <span class="t">流水线 · 状态机总览</span>
+          <select class="sel"><option>团队：全部</option><option>云门禁</option><option>车行云</option><option>云访客（直传）</option></select>
+          <select class="sel"><option>链路：全部</option><option>tr-20260803-0001</option><option>tr-20260802-0007</option></select>
+          <span class="grow"></span>
+          <button class="sel" onclick="document.querySelectorAll('.card').forEach(c=>{c.style.transform='scale(.98)';setTimeout(()=>c.style.transform='',200)})">⟳ 刷新</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><b style="color:var(--accent)">2</b><span class="k">活跃链路</span></div>
+          <div class="stat"><b>3</b><span class="k">待办任务</span></div>
+          <div class="stat"><b style="color:var(--danger)">1</b><span class="k">失败</span></div>
+          <div class="stat"><b style="color:var(--orange)">1</b><span class="k">回退重做</span></div>
+          <div class="stat"><b style="color:var(--warn)">12.4k</b><span class="k">⚡token 今日</span></div>
+          <div class="stat"><b style="color:var(--good)">8</b><span class="k">事件 / 10min</span></div>
+        </div>
+
+        <div class="pipeline">
+          <div class="trace-block">
+            <div class="trace-head">
+              <span class="id">tr-20260803-0001</span>
+              <span class="title">云门禁团队 → 为登录模块增加结构化日志</span>
+              <span class="team">云门禁 · dispatch</span>
+              <span class="prog">阶段 3/5 · token 6.2k</span>
+            </div>
+            <div class="lanes">
+              <div class="lane">
+                <div class="lane-head">PM</div>
+                <div class="lane-body">
+                  <div class="card success" onclick="tip(this,'pm · t-20260803-0001','worker-A · status: success','PRD / 任务卡 ×3 / DAG 已产出','token: 890 · 890','')"><div class="row"><span>✅</span><span class="task">pm</span><span class="wb">worker-A</span></div><div class="sub">PRD · 任务卡 ×3</div></div>
+                </div>
+              </div>
+              <div class="connector"><div class="arrow">→</div><div class="gate pass">🛂 门禁① 通过</div></div>
+              <div class="lane">
+                <div class="lane-head">DEV</div>
+                <div class="lane-body">
+                  <div class="card success" onclick="tip(this,'dev · t-20260803-0002','worker-B · status: success','login 日志接入完成','token: 2011 · 890','')"><div class="row"><span>✅</span><span class="task">dev</span><span class="wb">worker-B</span></div><div class="sub">login · patch ✓</div></div>
+                  <div class="card running" onclick="tip(this,'dev · t-20260803-0003','worker-B · status: running','logout 日志 + logger.ts 新增','token: 输入中…','')"><div class="row"><span>🔄</span><span class="task">dev</span><span class="wb">worker-B</span></div><div class="sub">logout · 执行中</div></div>
+                  <div class="card pending" onclick="tip(this,'dev · t-20260803-0004','worker-B · status: pending','单测补充（待排队）','—','')"><div class="row"><span>⏸</span><span class="task">dev</span><span class="wb">worker-B</span></div><div class="sub">单测 · 待处理</div></div>
+                </div>
+              </div>
+              <div class="connector"><div class="arrow">→</div><div class="gate wait">评审中</div></div>
+              <div class="lane">
+                <div class="lane-head">REVIEW</div>
+                <div class="lane-body"><div class="empty">⏸ 排队中<br>等待 dev 全部完成</div></div>
+              </div>
+              <div class="connector"><div class="arrow" style="color:var(--gray)">→</div><div class="gate wait">🛂 门禁②</div></div>
+              <div class="lane">
+                <div class="lane-head">QA</div>
+                <div class="lane-body"><div class="empty">⏸ 占位</div></div>
+              </div>
+              <div class="connector"><div class="arrow" style="color:var(--gray)">→</div><div class="gate wait">🛂 门禁③</div></div>
+              <div class="lane">
+                <div class="lane-head">DEPLOY</div>
+                <div class="lane-body"><div class="empty">⏸ 占位</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="trace-block">
+            <div class="trace-head">
+              <span class="id">tr-20260802-0007</span>
+              <span class="title">车行云团队 → 访客门禁联动改造</span>
+              <span class="team">车行云 · dispatch</span>
+              <span class="prog">阶段 2/5 · token 3.1k</span>
+            </div>
+            <div class="lanes">
+              <div class="lane">
+                <div class="lane-head">PM</div>
+                <div class="lane-body">
+                  <div class="card success" onclick="tip(this,'pm · t-20260802-0006','worker-A · status: success','需求边界澄清 + 任务卡 ×2','token: 640 · 640','')"><div class="row"><span>✅</span><span class="task">pm</span><span class="wb">worker-A</span></div><div class="sub">PRD · 任务卡 ×2</div></div>
+                </div>
+              </div>
+              <div class="connector"><div class="arrow">→</div><div class="gate pass">🛂 门禁① 通过</div></div>
+              <div class="lane">
+                <div class="lane-head">DEV</div>
+                <div class="lane-body">
+                  <div class="card rolled" onclick="tip(this,'dev · t-20260802-0007','worker-C · status: failed → 重做 2/3','review 驳回：边界条件未覆盖','token: 1502 · 601','error: 门禁超时分支缺失')"><div class="row"><span>↩</span><span class="task">dev</span><span class="wb">worker-C</span></div><div class="sub">重做 2/3 · 被驳回</div></div>
+                </div>
+              </div>
+              <div class="connector"><div class="arrow" style="color:var(--danger)">→</div><div class="gate fail">❌ 驳回</div></div>
+              <div class="lane">
+                <div class="lane-head">REVIEW</div>
+                <div class="lane-body">
+                  <div class="card failed" onclick="tip(this,'review · t-20260802-0008','worker-C · status: failed','问题清单：3 条，已回退 dev','token: 733 · 733','')"><div class="row"><span>❌</span><span class="task">review</span><span class="wb">worker-C</span></div><div class="sub">reject · 清单 3</div></div>
+                </div>
+              </div>
+              <div class="connector"><div class="arrow" style="color:var(--gray)">→</div><div class="gate wait">🛂 门禁②</div></div>
+              <div class="lane">
+                <div class="lane-head">QA</div>
+                <div class="lane-body"><div class="empty">⏸ 占位</div></div>
+              </div>
+              <div class="connector"><div class="arrow" style="color:var(--gray)">→</div><div class="gate wait">🛂 门禁③</div></div>
+              <div class="lane">
+                <div class="lane-head">DEPLOY</div>
+                <div class="lane-body"><div class="empty">⏸ 占位</div></div>
+              </div>
+            </div>
+            <div class="rollback"><span>↩ 回退路径</span><span class="line"></span><span>review 驳回 → dev 重做（2/3，超 3 轮升级人工）</span></div>
+          </div>
+        </div>
+
+        <div class="events">
+          <div class="events-head">
+            <span class="t">事件流 · 实时（全链路）</span>
+            <span class="chip on" data-f="all" onclick="filter(this)">全部</span>
+            <span class="chip" data-f="success" onclick="filter(this)">成功</span>
+            <span class="chip" data-f="failed" onclick="filter(this)">失败</span>
+            <span class="chip" data-f="gate" onclick="filter(this)">门禁</span>
+            <span class="chip" data-f="rollback" onclick="filter(this)">回退</span>
+            <span class="chip" data-f="produced" onclick="filter(this)">投递</span>
+            <span class="grow" style="flex:1"></span>
+            <span style="font-size:11px;color:var(--muted)">自动跟随 ●</span>
+          </div>
+          <div class="event-list">
+            <div class="ev success"><span class="ts">09:05:27</span><span>✅ <b>stage_progress</b> t-…-0003 dev 完成（worker-B）</span><span class="trace">tr-…-0001</span></div>
+            <div class="ev gate"><span class="ts">09:04:01</span><span>🛂 <b>gate_passed</b> 门禁① PRD 评审通过（tr-…-0001）</span><span class="trace">tr-…-0001</span></div>
+            <div class="ev rollback"><span class="ts">09:02:55</span><span>↩ <b>stage_rolled_back</b> review 驳回 → dev 重做 2/3（tr-…-0007）</span><span class="trace">tr-…-0007</span></div>
+            <div class="ev produced"><span class="ts">09:02:10</span><span>📥 <b>produced</b> dev 任务已投递 t-…-0007（worker-C）</span><span class="trace">tr-…-0007</span></div>
+            <div class="ev running"><span class="ts">09:01:33</span><span>🔄 <b>running</b> t-…-0003 worker-B 开始执行</span><span class="trace">tr-…-0001</span></div>
+            <div class="ev success"><span class="ts">09:00:12</span><span>✅ <b>agent_complete</b> t-…-0001 pm 完成 · token 890</span><span class="trace">tr-…-0001</span></div>
+            <div class="ev produced"><span class="ts">08:58:40</span><span>📥 <b>produced</b> dev 任务已投递 t-…-0002（worker-B）</span><span class="trace">tr-…-0001</span></div>
+            <div class="ev failed"><span class="ts">08:57:22</span><span>❌ <b>agent_complete</b> t-…-0008 review 未通过 · 问题清单 3 条</span><span class="trace">tr-…-0007</span></div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- ═════════ 视图② 子 Agent 工作台（我的收件箱 · directive / expected_output · 执行与回传） ═════════ -->
+    <div id="view-worker" style="display:none">
+      <aside class="worker-side">
+        <div class="idcard">
+          <div class="avatar">🛠</div>
+          <div><div class="who">worker-B</div><div class="role">角色：dev · 机器：TRAE-B</div></div>
+          <span class="live">● 轮询中</span>
+        </div>
+        <div class="wstats">
+          <div class="wstat"><b style="color:var(--accent)">1</b><span>执行中</span></div>
+          <div class="wstat"><b>1</b><span>待处理</span></div>
+          <div class="wstat"><b style="color:var(--good)">3</b><span>今日完成</span></div>
+          <div class="wstat"><b>0</b><span>失败重试</span></div>
+        </div>
+        <div class="inbox">
+          <div class="inbox-label">📬 我的收件箱（inbox/ · 按 task_id）</div>
+          <div class="task-item running on" id="ti-t3" onclick="renderTask('t3')">
+            <div class="t1"><span>🔄</span><span class="tid">t-20260803-0003</span><span class="st" style="color:var(--accent)">执行中</span></div>
+            <div class="t2">logout 日志 + logger.ts 新增</div>
+            <div class="t3">tr-…-0001 · 云门禁 · 启动 78s</div>
+          </div>
+          <div class="task-item" id="ti-t4" onclick="renderTask('t4')">
+            <div class="t1"><span>⏸</span><span class="tid">t-20260803-0004</span><span class="st" style="color:var(--gray)">待处理</span></div>
+            <div class="t2">单测补充（acceptance 要求）</div>
+            <div class="t3">tr-…-0001 · 云门禁 · 排队中</div>
+          </div>
+          <div class="task-item success" id="ti-t2" onclick="renderTask('t2')">
+            <div class="t1"><span>✅</span><span class="tid">t-20260803-0002</span><span class="st" style="color:var(--good)">已完成</span></div>
+            <div class="t2">login 日志接入</div>
+            <div class="t3">tr-…-0001 · 云门禁 · 09:02:27 回传</div>
+          </div>
+          <div class="task-item rolled" id="ti-t7" onclick="renderTask('t7')">
+            <div class="t1"><span>↩</span><span class="tid">t-20260802-0007</span><span class="st" style="color:var(--orange)">被打回 2/3</span></div>
+            <div class="t2">门禁联动改造（review 驳回）</div>
+            <div class="t3">tr-…-0007 · 车行云 · worker-C</div>
+          </div>
+        </div>
+        <div class="side-foot">
+          <span class="st">🧠 知识库命中 2</span>
+          <span class="st" style="color:var(--good)">✓ hook 已上报</span>
+          <span class="st">⏰ 上次唤醒 09:05:30</span>
+        </div>
+      </aside>
+
+      <main class="worker-main" id="task-detail">
+        <!-- 任务详情由 JS renderTask 渲染 -->
+      </main>
+    </div>
+
+    <!-- ═════════ 视图③ 主 Agent 信息入口（任务工作区：新任务建文件夹，统一收口读取） ═════════ -->
+    <div id="view-intake" style="display:none">
+      <main class="intake">
+        <div class="wizard">
+          <span class="t">📥 信息入口 · 任务工作区</span>
+          <span class="wstep" id="ws0"><span class="n">1</span>建文件夹 <b>&lt;trace_id&gt;/</b></span>
+          <span class="wstep" id="ws1"><span class="n">2</span>收原始输入 input/</span>
+          <span class="wstep" id="ws2"><span class="n">3</span>markitdown 清洗 clean/</span>
+          <span class="wstep" id="ws3"><span class="n">4</span>知识库 query knowledge/</span>
+          <span class="wstep" id="ws4"><span class="n">5</span>拆解 docs/（团队任务卡）</span>
+          <span class="wstep" id="ws5"><span class="n">6</span>👋 人工指派 · 内部团队选员工</span>
+        </div>
+        <div class="ws-body">
+          <div class="ws-list">
+            <div class="ws-list-head"><span class="t">🗂 任务工作区</span><button onclick="openNewModal()">＋ 新建任务</button></div>
+            <div class="ws-items" id="ws-items">
+              <!-- 工作区列表由 JS renderWsList 渲染 -->
+            </div>
+          </div>
+          <div class="ws-main">
+            <div class="wstree" id="ws-tree">
+              <!-- 目录树由 JS renderWs 渲染 -->
+            </div>
+            <div class="ws-preview">
+              <div class="pv-head" id="pv-head">选择左侧文件查看内容</div>
+              <div class="pv-body" id="pv-body"></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- 状态栏 -->
+  <div id="statusbar">
+    <span>🚀 2 活跃 · 3 待办 · 1 失败 · 1 回退</span>
+    <span class="grow"></span>
+    <span class="right"><span>AgentPulse · 主 Agent 指挥台</span><span>⚡ 12.4k / 今日</span></span>
+  </div>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<!-- 新建任务引导模态框 -->
+<div class="mask" id="new-mask" onclick="if(event.target===this)closeNewModal()">
+  <div class="modal">
+    <div class="modal-head">📥 新建任务 · 信息入口引导</div>
+    <div class="modal-body">
+      <ol class="guide">
+        <li><b>① 填写需求信息</b>：标题 / 团队 / 输入来源（文件路径或粘贴文本）。</li>
+        <li><b>② 把原始需求数据放到目标目录</b>（下方路径，我建文件夹时自动创建）：
+          <div class="dropdir">
+            <div class="cap">📁 原始需求放置目录（input/）</div>
+            <div class="path" id="in-dir">runtime/workspaces/<span id="in-tid">tr-20260803-0002</span>/input/</div>
+            <div class="cap" style="margin-top:6px">支持 doc / docx / pdf / txt / 企业微信消息文本；也可以直接在上方"输入文件路径"填文件位置，我自动拷入该目录。</div>
+          </div>
+        </li>
+        <li><b>③ 点击「🚀 开始处理」触发完整流程</b>：建文件夹 → markitdown 清洗 → 知识库 query → 拆解 PRD/任务卡/DAG → 投递 agent-tasks。</li>
+      </ol>
+      <div class="form-row"><label>任务标题</label><input id="in-title" value="车牌识别联动" placeholder="一句话描述需求"></div>
+      <div class="form-row"><label>匹配团队</label>
+        <div class="team-match" id="in-team"></div>
+      </div>
+      <div class="form-row"><label>输入文件路径</label><input id="in-file" value="runtime/workspaces/tr-20260803-0002/input/requirement.pdf" placeholder="留空则粘贴下方文本"></div>
+      <div class="form-row"><label>需求原文</label><textarea id="in-text" rows="2" style="flex:1;background:#0b1220;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 10px;font-size:12px;resize:vertical" placeholder="或把需求原文/企业微信消息粘贴到这里"></textarea></div>
+    </div>
+    <div class="modal-foot">
+      <span style="font-size:11px;color:var(--muted);margin-right:auto">trace_id 自动生成 · 流程状态实时可见</span>
+      <button class="btn" onclick="closeNewModal()">取消</button>
+      <button class="btn primary" onclick="startNewWorkspace()">🚀 开始处理</button>
+    </div>
+  </div>
+</div>
+
+<!-- 手动指派模态框：团队任务 → 员工 -->
+<div class="mask" id="assign-mask" onclick="if(event.target===this)closeAssign()">
+  <div class="modal" style="width:660px">
+    <div class="modal-head">👋 人工介入 · 选择内部团队参与员工 <span style="font-size:11px;color:var(--muted);font-weight:400">（需求已拆分到团队，待人工指派后投递）</span></div>
+    <div class="modal-body" id="assign-body"><!-- 由 JS openAssign 渲染 --></div>
+    <div class="modal-foot">
+      <span style="font-size:11px;color:var(--muted);margin-right:auto">指派后按员工 worker_id 投递 agent-tasks（key=员工编号）</span>
+      <button class="btn" onclick="closeAssign()">暂不投递</button>
+      <button class="btn primary" onclick="confirmAssign()">确认指派并投递 🚀</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  /* ============ 三套视角切换 ============ */
+  function switchView(v){
+    document.querySelectorAll('.activity .ic').forEach(i=>i.classList.remove('on'));
+    document.getElementById('ic-' + v).classList.add('on');
+    document.getElementById('view-main').style.display = v === 'main' ? 'flex' : 'none';
+    document.getElementById('view-worker').style.display = v === 'worker' ? 'flex' : 'none';
+    document.getElementById('view-intake').style.display = v === 'intake' ? 'flex' : 'none';
+    const sb = document.getElementById('statusbar');
+    if (v === 'worker') {
+      sb.innerHTML = '<span>🛠 执行中 1 · 待处理 1 · 今日完成 3</span><span class="grow"></span><span class="right"><span>AgentPulse · 子 Agent 工作台（worker-B）</span><span>● 本地流</span></span>';
+    } else if (v === 'intake') {
+      sb.innerHTML = '<span>📥 工作区 2 · 本任务统一从 workspaces/&lt;trace_id&gt;/ 读写</span><span class="grow"></span><span class="right"><span>AgentPulse · 主 Agent 信息入口</span><span>⚡ 12.4k / 今日</span></span>';
+    } else {
+      sb.innerHTML = '<span>🚀 2 活跃 · 3 待办 · 1 失败 · 1 回退</span><span class="grow"></span><span class="right"><span>AgentPulse · 主 Agent 指挥台</span><span>⚡ 12.4k / 今日</span></span>';
+    }
+  }
+  /* ============ 子 Agent 任务数据（模拟） ============ */
+  const TASKS = {
+    t3: {
+      status:'running', statusTxt:'🔄 执行中', color:'var(--accent)',
+      title:'logout 日志 + logger.ts 新增',
+      meta:[['task_id','t-20260803-0003'],['trace_id','tr-20260803-0001'],['parent_task_id','p-20260803-0001'],['agent_role','dev'],['worker_id','worker-B'],['路由','route_path: root → team-cloud-door → dev']],
+      directive:{
+        objective:'为 logout 出口增加结构化日志，并新增 logger.ts 集中导出日志工具',
+        background:'父任务要求提升登录模块可观测性；login 任务（t-…-0002）已完成，本任务为配套补齐。',
+        instructions:['logout 出口加 INFO 级结构化日志','日志字段：trace_id、user_id、event、ts','logger.ts 复用 withTrace(ctx) 工具'],
+        acceptance:['logout 输出结构化日志','npm run build 通过','日志中 user_id 脱敏'],
+        constraints:'language: typescript · 禁止改动 package.json 依赖版本'
+      },
+      expected:{
+        deliverables:['src/logger.ts (新增)','src/user.ts (修改)'],
+        result_file:'runtime/outbox/t-20260803-0003.result.json',
+        patch_required:true,
+        result_schema:['status','summary','artifacts','patch','metrics.token_usage']
+      },
+      kb:['复用 withTrace(ctx) 工具（来源 t-20260715-0042）','user_id 需脱敏（来源 t-20260720-0011）'],
+      exec:{cmd:'trae-cli run --file inbox/t-20260803-0003.md --output runtime/outbox/t-20260803-0003.result.json', elapsed:'78s', token:'🔤 输入 1,240 · 输出输出中', step:'12 / 50 steps'},
+      result:null
+    },
+    t4: {
+      status:'pending', statusTxt:'⏸ 待处理', color:'var(--gray)',
+      title:'单测补充（acceptance 要求）',
+      meta:[['task_id','t-20260803-0004'],['trace_id','tr-20260803-0001'],['parent_task_id','p-20260803-0001'],['agent_role','dev'],['worker_id','worker-B']],
+      directive:{
+        objective:'为日志改造补充单测：覆盖 login/logout 日志输出与 user_id 脱敏',
+        background:'承接 dev 任务 t-…-0002/0003，验收标准要求单测通过。',
+        instructions:['为 logger.ts 补充 3 个用例','断言日志字段含 trace_id/user_id/event/ts','断言 user_id 脱敏格式'],
+        acceptance:['npm test 通过','覆盖率 ≥ 80%'],
+        constraints:'仅新增测试文件，不改动业务代码'
+      },
+      expected:{deliverables:['test/logger.test.ts (新增)'], result_file:'runtime/outbox/t-20260803-0004.result.json', patch_required:false,
+        result_schema:['status','summary','artifacts','metrics.token_usage']},
+      kb:['项目测试基线：vitest（来源 t-20260628-0019）'],
+      exec:null, result:null
+    },
+    t2: {
+      status:'success', statusTxt:'✅ 已完成', color:'var(--good)',
+      title:'login 日志接入',
+      meta:[['task_id','t-20260803-0002'],['trace_id','tr-20260803-0001'],['parent_task_id','p-20260803-0001'],['agent_role','dev'],['worker_id','worker-B']],
+      directive:{
+        objective:'为 login 出口增加结构化日志',
+        background:'父任务要求提升登录模块可观测性。',
+        instructions:['login 成功/失败出口加 INFO 级结构化日志','日志字段：trace_id、user_id、event、ts'],
+        acceptance:['login 输出结构化日志','npm run build 通过'],
+        constraints:'language: typescript'
+      },
+      expected:{deliverables:['src/user.ts (修改)'], result_file:'runtime/outbox/t-20260803-0002.result.json', patch_required:true,
+        result_schema:['status','summary','artifacts','patch','metrics.token_usage']},
+      kb:['复用 withTrace(ctx) 工具（来源 t-20260715-0042）'],
+      exec:null,
+      result:{status:'success', summary:'login 日志接入完成，patch 已回传', artifacts:['src/user.ts'], patch:'diff --git a/src/user.ts b/src/user.ts (+12/-3)', token:{input:2011, output:890}}
+    },
+    t7: {
+      status:'rolled', statusTxt:'↩ 被打回 · 重做 2/3', color:'var(--orange)',
+      title:'访客门禁联动改造（review 驳回）',
+      meta:[['task_id','t-20260802-0007'],['trace_id','tr-20260802-0007'],['parent_task_id','p-20260802-0007'],['agent_role','dev'],['worker_id','worker-C']],
+      directive:{
+        objective:'访客门禁联动：超时分支需覆盖 3 种异常路径',
+        background:'review（t-…-0008）驳回：门禁超时分支缺失、返回值类型不严谨、缺少错误日志。',
+        instructions:['补全超时/黑名单/重复放行 3 个分支','返回值统一 Result 类型','异常路径记录 error 日志'],
+        acceptance:['3 种异常路径均覆盖','review 问题清单 3 条全部关闭'],
+        constraints:'与现有门禁 SDK 兼容'
+      },
+      expected:{deliverables:['src/gate.ts (修改)','src/gate.types.ts (新增)'], result_file:'runtime/outbox/t-20260802-0007.result.json', patch_required:true,
+        result_schema:['status','summary','artifacts','patch','metrics.token_usage']},
+      kb:['门禁超时处理历史方案（来源 t-20260711-0033）'],
+      exec:null,
+      result:{status:'failed', summary:'被驳回：问题清单 3 条', artifacts:[], patch:'', token:{input:1502, output:601}, error:'①门禁超时分支缺失 ②返回值类型不严谨 ③缺少错误日志'}
+    }
+  };
+  function renderTask(id){
+    const t = TASKS[id];
+    document.querySelectorAll('.task-item').forEach(i=>i.classList.remove('on'));
+    const el = document.getElementById('ti-' + id); if(el) el.classList.add('on');
+    const box = document.getElementById('task-detail');
+    const meta = t.meta.map(m => '<div class="dl"><span class="k">'+m[0]+'</span><span class="v">'+m[1]+'</span></div>').join('');
+    const inst = t.directive.instructions.map(i => '<div class="dl"><span class="k"></span><span class="v">· '+i+'</span></div>').join('');
+    const acc = t.directive.acceptance.map(i => '<div class="dl"><span class="k"></span><span class="v">· '+i+'</span></div>').join('');
+    const del = t.expected.deliverables.map(d => '<div class="dl"><span class="k"></span><span class="v">· '+d+'</span></div>').join('');
+    const kb = t.kb.map(k => '<div class="kb-item">🧠 '+k+'</div>').join('');
+    let execHtml = '', resultHtml = '';
+    if (t.exec){
+      execHtml = '<div class="dsec"><h4>⚙️ 执行（trae-cli）</h4><div class="exec"><code>'+t.exec.cmd+'</code><div style="margin-top:6px;color:var(--accent)">运行中 · '+t.exec.elapsed+' · '+t.exec.token+' · '+t.exec.step+'</div></div></div>';
+    }
+    if (t.result){
+      const r = t.result;
+      const rcolor = r.status === 'success' ? 'var(--good)' : 'var(--danger)';
+      resultHtml = '<div class="dsec"><h4>📦 结果（已回传 agent-results）</h4><div class="result-box"><div style="color:'+rcolor+';font-weight:700">'+ (r.status==='success'?'✅':'❌') + ' status: '+r.status+'</div><div>'+r.summary+'</div>' +
+        (r.patch ? '<div style="margin-top:4px;color:var(--muted)">'+r.patch+'</div>' : '') +
+        (r.error ? '<div style="margin-top:4px;color:var(--danger)">'+r.error+'</div>' : '') +
+        '<div style="margin-top:4px;color:var(--warn)">⚡ token: input '+r.token.input+' · output '+r.token.output+'</div></div></div>';
+    }
+    box.innerHTML =
+      '<div class="dhead"><span class="t">'+t.title+'</span><span class="id">'+t.meta[0][1]+'</span><span style="margin-left:auto;color:'+t.color+'">'+t.statusTxt+'</span></div>' +
+      '<div class="dsec"><h4>📇 标识</h4>'+meta+'</div>' +
+      '<div class="dsec"><h4>📋 directive · 任务指示</h4>' +
+        '<div class="dl"><span class="k">objective</span><span class="v">'+t.directive.objective+'</span></div>' +
+        '<div class="dl"><span class="k">background</span><span class="v">'+t.directive.background+'</span></div>' +
+        '<div class="dl"><span class="k">instructions</span><span class="v"></span></div>'+inst +
+        '<div class="dl"><span class="k">acceptance</span><span class="v"></span></div>'+acc +
+        '<div class="dl"><span class="k">constraints</span><span class="v">'+t.directive.constraints+'</span></div>' +
+      '</div>' +
+      '<div class="dsec"><h4>🎯 expected_output · 预期返回</h4>' +
+        '<div class="dl"><span class="k">deliverables</span><span class="v"></span></div>'+del +
+        '<div class="dl"><span class="k">result_file</span><span class="v">'+t.expected.result_file+'</span></div>' +
+        '<div class="dl"><span class="k">patch_required</span><span class="v">'+t.expected.patch_required+'</span></div>' +
+        '<div class="dl"><span class="k">result_schema</span><span class="v">'+t.expected.result_schema.join(' · ')+'</span></div>' +
+      '</div>' +
+      '<div class="dsec"><h4>🧠 知识库 query 命中</h4>'+kb+'</div>' +
+      execHtml + resultHtml;
+  }
+  /* ============ 主视图：链路树折叠 ============ */
+  function toggle(el){
+    const next = el.nextElementSibling;
+    if(!next || !next.classList.contains('tree-children')) return;
+    if(next.style.display === 'none'){ next.style.display = ''; el.textContent = '▾ ' + el.textContent.slice(2); }
+    else{ next.style.display = 'none'; el.textContent = '▸ ' + el.textContent.slice(2); }
+  }
+  /* ============ 主视图：任务卡详情浮层 ============ */
+  function tip(card, task, who, what, token, err){
+    const t = document.getElementById('tip');
+    t.style.display = 'block';
+    t.innerHTML = '<div style="font-weight:700;color:var(--accent)">'+task+'</div><div class="k">'+who+'</div><div style="margin-top:6px">'+what+'</div><div style="margin-top:6px;color:var(--warn)">'+token+'</div>' + (err ? '<div style="margin-top:4px;color:var(--danger)">'+err+'</div>' : '');
+    const r = card.getBoundingClientRect();
+    let x = r.right + 14, y = r.top;
+    if(x + 320 > innerWidth) x = r.left - 334;
+    t.style.left = x + 'px'; t.style.top = y + 'px';
+  }
+  document.addEventListener('click', e => { if(!e.target.closest('.card')) document.getElementById('tip').style.display = 'none'; });
+  /* ============ 主视图：事件流筛选 ============ */
+  function filter(chip){
+    document.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c === chip));
+    const f = chip.dataset.f;
+    document.querySelectorAll('.ev').forEach(ev => ev.style.display = (f === 'all' || ev.classList.contains(f)) ? '' : 'none');
+  }
+  /* 初始渲染子 Agent 视图详情 */
+  renderTask('t3');
+
+  /* ============ 视图③ 信息入口 · 任务工作区 ============ */
+  let curWs = 'tr-20260803-0001';
+  const WORKSPACES = {
+    'tr-20260803-0001': {
+      title:'云门禁 → 结构化日志', team:'云门禁团队 + 车行云团队', status:'active', stage:'dev', built:5,
+      assign:['sz_jsxt116','sz_jsxt117','sz_jsxt119'],
+      tree:{
+        input:['nio.pdf'], clean:['nio.pdf.md'], knowledge:['query-001.json'],
+        docs:['PRD.md','dag.json','task-cards/t-20260803-0002.md','task-cards/t-20260803-0003.md','task-cards/t-20260803-0004.md'],
+        results:['t-20260803-0002.result.json','t-20260803-0003.result.json']
+      }
+    },
+    'tr-20260802-0007': {
+      title:'车行云 → 门禁改造', team:'车行云团队', status:'active', stage:'dev', built:5,
+      assign:['sz_jsxt118','sz_jsxt119'],
+      tree:{
+        input:['requirement.docx'], clean:['requirement.docx.md'], knowledge:['query-001.json'],
+        docs:['PRD.md','dag.json','task-cards/t-20260802-0007.md','task-cards/t-20260802-0008.md'],
+        results:['t-20260802-0007.result.json','t-20260802-0008.result.json']
+      }
+    }
+  };
+  const WS_ORDER = [['input','① 原始输入'],['clean','② 清洗后'],['knowledge','③ 知识库 query'],['docs','④ 需求文档'],['results','⑤ 结果回传']];
+  function wsFile(path, el){
+    return '<div class="ws-file" onclick="preview(\''+path+'\', this)">📄 '+path+'<span class="ok">✓</span></div>';
+  }
+  function renderWsList(){
+    const box = document.getElementById('ws-items');
+    box.innerHTML = Object.keys(WORKSPACES).map(id => {
+      const ws = WORKSPACES[id];
+      const waiting = ws.built >= 5 && !ws.assign;
+      return '<div class="ws-item'+(id===curWs?' on':'')+'" onclick="renderWs(\''+id+'\')">' +
+        '<div class="w1">🗂 <span class="wid">'+id+'</span></div>' +
+        '<div class="w2">'+ws.title+'</div>' +
+        '<div class="w3">'+(waiting ? '<span style="color:var(--warn)">⏸ 待人工指派</span> · '+ws.team : ws.team+' · '+ws.status+' · '+ws.stage)+'</div>' +
+        (waiting ? '<button class="btn" style="width:100%;margin-top:6px" onclick="event.stopPropagation();openAssign(\''+id+'\')">👋 人工指派 · 选择参与员工</button>' : '') +
+      '</div>';
+    }).join('');
+  }
+  function renderWs(id){
+    curWs = id;
+    renderWsList();
+    const ws = WORKSPACES[id];
+    const built = ws.built;
+    document.getElementById('ws-tree').innerHTML = buildTree(ws.tree, id, built);
+    preview('meta.json', null);
+    const first = document.querySelector('#ws-tree .ws-file'); if(first) first.classList.add('on');
+    // 向导步骤条：6 步，第 6 步「人工指派」由 ws.assign 决定完成/等待
+    const assigned = built >= 5 && !!ws.assign;
+    for(let i=0;i<6;i++){
+      const e = document.getElementById('ws'+i);
+      e.classList.toggle('done', i < built || (i === 5 && assigned));
+      e.classList.toggle('cur', i === built && !(i === 5 && assigned));
+    }
+  }
+  function buildTree(tree, id, built){
+    let html = '<div class="ws-folder">▾ 📁 <b>'+id+'/</b> <span style="color:var(--muted);font-weight:400">（'+WORKSPACES[id].title+'）</span></div><div class="ws-children">';
+    html += wsFile('meta.json', null);
+    WS_ORDER.forEach(([key, label], i) => {
+      const files = tree[key] || [];
+      const ready = i < built;
+      html += '<div class="ws-folder" style="font-weight:600">'+(ready?'▾':'▸')+' 📁 '+label+'/'+(ready?'':' <span class="doing">生成中…</span>')+'</div><div class="ws-children">';
+      if(ready && files.length){
+        files.forEach(f => {
+          const p = key==='docs' ? (f.startsWith('task-cards') ? f : f) : (key==='results' ? f : f);
+          html += wsFile((key==='docs'&&!f.startsWith('task-cards')?'docs/'+f:key+'/'+f), null);
+        });
+      } else if(ready){
+        html += '<div class="ws-file" style="cursor:default">（空，等待收口写入）</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+  function metaJson(id){
+    const ws = WORKSPACES[id];
+    return '<pre>'+JSON.stringify({
+      trace_id:id, title:ws.title, team_id:'team-cloud-door', status:ws.status,
+      stages:['pm','dev','review','qa','deploy'], current_stage:ws.stage,
+      created_at:'2026-08-03T09:00:00Z', input_file:'input/nio.pdf', clean_file:'clean/nio.pdf.md',
+      token_usage:{ total:6200, by_agent:{ pm:890, dev:2901 } },
+      files:['docs/PRD.md','docs/task-cards/…']
+    }, null, 2)+'</pre>';
+  }
+  function preview(path, el){
+    if(el){
+      document.querySelectorAll('.ws-file').forEach(f=>f.classList.remove('on'));
+      el.classList.add('on');
+    }
+    const head = document.getElementById('pv-head');
+    const body = document.getElementById('pv-body');
+    head.innerHTML = '📄 '+path+'<span class="p">'+curWs+'</span>';
+    if(path === 'meta.json'){ body.innerHTML = '<div class="pv-line"><span class="k">说明</span><span class="v">工作区元信息，我每次会话从它读取状态 / 阶段 / token 聚合</span></div>' + metaJson(curWs); return; }
+    if(path.endsWith('.pdf') || path.endsWith('.docx')){ body.innerHTML = '<div class="pv-line"><span class="k">原始输入</span><span class="v">'+path+'（本原型不预览二进制，实际经 markitdown 清洗后统一读 clean/*.md）</span></div>'; return; }
+    if(path.endsWith('.md') && path.includes('task-cards')){
+      const tid = path.match(/(t-[\d-]+)\.md/); const key = tid ? tid[1] : '';
+      const map = { 't-20260803-0002':'login 日志接入','t-20260803-0003':'logout 日志 + logger.ts','t-20260803-0004':'单测补充','t-20260802-0007':'门禁联动改造（重做）','t-20260802-0008':'review 评审' };
+      body.innerHTML = '<div class="pv-line"><span class="k">任务卡</span><span class="v">'+key+'</span></div><div class="pv-line"><span class="k">标题</span><span class="v">'+(map[key]||'—')+'</span></div><div class="pv-line"><span class="k">用途</span><span class="v">produceTask 的 directive 素材（§4.1）→ 投递 agent-tasks</span></div>';
+      return;
+    }
+    if(path.endsWith('.md')){ body.innerHTML = '<div class="pv-line"><span class="k">文档</span><span class="v">'+path+'</span></div><div class="pv-line"><span class="k">说明</span><span class="v">我拆解产出的需求文档（PRD / 边界 / 验收标准），投递前统一从这里读取。</span></div>'; return; }
+    if(path.endsWith('.json') && path.includes('results')){
+      body.innerHTML = '<div class="pv-line"><span class="k">结果</span><span class="v">'+path+'</span></div><div class="pv-line"><span class="k">来源</span><span class="v">agent-results 落地副本（§4.2），收口对账与总结从这读。</span></div>'; return;
+    }
+    if(path.endsWith('.json')){
+      body.innerHTML = '<div class="pv-line"><span class="k">知识</span><span class="v">'+path+'</span></div><div class="pv-line"><span class="k">来源</span><span class="v">知识库 query 响应（§5.1），拆解前注入上下文。</span></div>'; return;
+    }
+    body.innerHTML = '<div>'+path+'</div>';
+  }
+  async function newWorkspace(){ /* 由引导模态框 openNewModal/startNewWorkspace 替代 */ }
+  function nextTraceId(){
+    const ids = Object.keys(WORKSPACES).map(s => parseInt(s.replace(/^tr-\d{8}-/,''),10)||0);
+    const n = String(Math.max(0, ...ids) + 1).padStart(4,'0');
+    return 'tr-20260803-' + n;
+  }
+  function openNewModal(){
+    const id = nextTraceId();
+    document.getElementById('in-dir').innerHTML = 'runtime/workspaces/<b style="color:var(--warn)">' + id + '</b>/input/';
+    document.getElementById('in-file').value = 'runtime/workspaces/' + id + '/input/requirement.pdf';
+    renderTeamMatch();
+    document.getElementById('new-mask').style.display = 'flex';
+    document.getElementById('in-title').focus();
+  }
+  function closeNewModal(){ document.getElementById('new-mask').style.display = 'none'; }
+  async function startNewWorkspace(){
+    const id = nextTraceId();
+    const title = document.getElementById('in-title').value.trim() || '未命名需求';
+    const team = matchedTeams.join(' + ');
+    const file = document.getElementById('in-file').value.trim();
+    const text = document.getElementById('in-text').value.trim();
+    closeNewModal();
+    if(WORKSPACES[id]){ renderWs(id); return; }
+    WORKSPACES[id] = { title:title, team:team, status:'active', stage:'intake', built:0, tree:{} };
+    renderWsList(); renderWs(id);
+    const fname = (file ? file.split(/[\\/]/).pop() : (text ? 'input.txt' : 'requirement.pdf')) || 'requirement.pdf';
+    const steps = [['input',[fname]],['clean',[fname + '.md']],['knowledge',['query-001.json']],['docs',['PRD.md','dag.json','task-cards/' + id + '-task-001.md']],['results',[]]];
+    for(let i=0;i<steps.length;i++){
+      const [k, files] = steps[i];
+      WORKSPACES[id].tree[k] = files;
+      WORKSPACES[id].built = i + 1;
+      renderWs(id);
+      await new Promise(r=>setTimeout(r,650));
+    }
+    WORKSPACES[id].stage = 'pm';
+    renderWs(id);
+    // 拆解完成 → 弹出手动指派：团队任务 → 员工
+    openAssign(id);
+  }
+  renderWs('tr-20260803-0001');
+
+  /* ============ 员工列表 / 匹配团队 / 手动指派 ============ */
+  const MEMBERS = {
+    '云门禁团队': [
+      {id:'sz_jsxt116', roles:['pm','dev'], state:'on',   stateTxt:'在线'},
+      {id:'sz_jsxt117', roles:['dev','review'], state:'idle', stateTxt:'空闲'}
+    ],
+    '车行云团队': [
+      {id:'sz_jsxt118', roles:['dev','qa'], state:'busy', stateTxt:'忙碌'},
+      {id:'sz_jsxt119', roles:['dev'],      state:'on',   stateTxt:'在线'}
+    ]
+  };
+  const TEAM_KEYS = Object.keys(MEMBERS);
+  let matchedTeams = ['云门禁团队','车行云团队'];
+
+  function renderTeamMatch(){
+    const box = document.getElementById('in-team');
+    if(!box) return;
+    const chips = matchedTeams.map(t => '<span class="tchip">🏢 '+t+'<span class="x" onclick="removeTeam(this)">✕</span></span>').join('');
+    const addBtn = '<span class="tchip tchip-add" onclick="addTeam()">＋ 添加团队</span>';
+    const hint = '<span class="hint">团队由主 Agent 根据需求内容自动识别（一个需求可涉及多个团队）· 点击 ✕ 调整；拆出团队任务后手动指派给员工</span>';
+    box.innerHTML = chips + addBtn + hint;
+  }
+  function removeTeam(el){
+    const t = el.parentNode.textContent.replace('✕','').replace(/^🏢/,'').trim();
+    matchedTeams = matchedTeams.filter(x => x !== t);
+    renderTeamMatch();
+  }
+  function addTeam(){
+    const rest = TEAM_KEYS.filter(t => !matchedTeams.includes(t));
+    if(!rest.length) return;
+    matchedTeams.push(rest[0]);
+    renderTeamMatch();
+  }
+  function showToast(msg){
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.display = 'block';
+    clearTimeout(showToast._tm);
+    showToast._tm = setTimeout(()=>{ t.style.display='none'; }, 4500);
+  }
+  let assignWs = '';
+  let assignTeams = [];
+  function openAssign(id){
+    assignWs = id;
+    assignTeams = (WORKSPACES[id] && WORKSPACES[id].team ? WORKSPACES[id].team.split(' + ') : matchedTeams);
+    document.getElementById('assign-mask').style.display = 'flex';
+    document.getElementById('assign-body').innerHTML =
+      '<div style="font-size:12px;color:var(--accent);margin-bottom:6px">✅ 需求已拆分到团队任务卡（docs/task-cards/）——请为<b>内部团队</b>选择参与员工，确认后才投递；直传型部门自动出需求文档，无需选择。</div>' +
+      assignTeams.map(team => {
+        const members = MEMBERS[team] || [];
+        if(!members.length){
+          return '<div class="assign-block"><div class="assign-team">🏢 '+team+'</div><div class="assign-task">直传型（leaf_behavior=doc）：原样产出需求文档直接交付，<b style="color:var(--muted)">无需人工指派</b></div></div>';
+        }
+        const taskDesc = team==='云门禁团队' ? '云门禁 → 日志接入（login 日志 / logout+logger，共 2 个任务卡）'
+          : team==='车行云团队' ? '车行云 → 车牌识别联动（共 1 个任务卡）'
+          : '团队任务拆解（任务卡见 docs/task-cards/）';
+        const mchecks = members.map(m => {
+          const checked = m.state !== 'busy' ? 'checked' : '';
+          return '<label class="member-check"><input type="checkbox" value="'+m.id+'" '+checked+'> <b>'+m.id+'</b> <span class="ms">'+m.roles.join('/')+' · '+m.stateTxt+'</span></label>';
+        }).join('');
+        return '<div class="assign-block"><div class="assign-team">🏢 '+team+'<span class="cnt" style="margin-left:auto;font-size:11px;color:var(--muted)">内部团队 · 需人工选择</span></div><div class="assign-task">任务：'+taskDesc+'</div>'+mchecks+'</div>';
+      }).join('') +
+      '<div style="font-size:11px;color:var(--gray);margin-top:8px">💡 指派对象即执行员工（worker_id = 员工编号）；同一任务可指派多人（并行）或仅一人；未勾选 = 该员工本轮不参与。<b>确认前任务保持「⏸ 待人工指派」，不会投递。</b></div>';
+  }
+  function closeAssign(){ document.getElementById('assign-mask').style.display = 'none'; }
+  function confirmAssign(){
+    const picks = [];
+    document.querySelectorAll('#assign-body .member-check input:checked').forEach(c => picks.push(c.value));
+    const byTeam = assignTeams.map(t => {
+      const ms = (MEMBERS[t]||[]).filter(m => picks.includes(m.id)).map(m => m.id).join(',');
+      return t + '→' + (ms || (MEMBERS[t] ? '未指派' : '直传·出文档'));
+    });
+    closeAssign();
+    const ws = WORKSPACES[assignWs];
+    if(ws){ ws.assign = picks; ws.stage = 'dev'; renderWs(assignWs); }
+    showToast('🚀 已人工指派并投递 ' + assignWs + '：' + byTeam.join(' · '));
+  }
+</script>
+</body>
+</html>
